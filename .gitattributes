@@ -1,0 +1,93 @@
+# .gitattributes for linmemparser Rust project
+#
+# This file controls how Git handles line endings and file attributes
+# See: https://git-scm.com/docs/gitattributes
+
+# Default behavior: normalize line endings to LF on commit
+* text=auto
+
+# Explicitly declare text files with LF line endings
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Shell scripts should use LF line endings
+*.sh text eol=lf
+
+# Windows-specific files should use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Lock files
+Cargo.lock text eol=lf
+
+# Documentation files
+LICENSE text eol=lf
+README* text eol=lf
+CHANGELOG* text eol=lf
+CLAUDE.md text eol=lf
+*.md text eol=lf diff=markdown
+
+# Git configuration files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Binary files (memory dumps, images, etc.)
+*.lime binary
+*.raw binary
+*.mem binary
+*.dmp binary
+*.dump binary
+
+# Compressed files
+*.gz binary
+*.xz binary
+*.bz2 binary
+*.7z binary
+*.zip binary
+*.tar binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text eol=lf
+
+# Archives
+*.a binary
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary
+
+# Compiled Rust artifacts (if accidentally committed)
+*.rlib binary
+*.rmeta binary
+
+# Differential rendering for specific file types
+*.rs diff=rust
+*.toml diff=toml
+*.json diff=json
+
+# Merge strategy hints
+*.toml merge=union
+Cargo.lock merge=union
+
+# Mark vendored dependencies (if using cargo vendor)
+vendor/** linguist-vendored
+target/** linguist-generated
+
+# Mark test fixtures and data
+tests/fixtures/** binary
+TESTDATA/** binary
+
+# Documentation should be detected as documentation
+docs/** linguist-documentation
+*.md linguist-documentation
