@@ -30,7 +30,6 @@ Cargo.lock text eol=lf
 LICENSE text eol=lf
 README* text eol=lf
 CHANGELOG* text eol=lf
-CLAUDE.md text eol=lf
 *.md text eol=lf diff=markdown
 
 # Git configuration files
