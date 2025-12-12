@@ -23,12 +23,10 @@ pub struct PluginManager {
 #[allow(dead_code)]
 impl PluginManager {
     pub fn new() -> Self {
-        let manager = Self {
-            plugins: HashMap::new(),
-        };
-
         // For now, just return an empty manager
-        manager
+        Self {
+            plugins: HashMap::new(),
+        }
     }
 
     pub fn list_plugins(&self) -> Vec<(&str, &str)> {

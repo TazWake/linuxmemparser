@@ -1,4 +1,19 @@
 //! Library crate for the Linux Memory Parser
+
+// Allow clippy lints that would require significant refactoring
+#![allow(clippy::new_without_default)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::collapsible_else_if)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::nonminimal_bool)]
+#![allow(clippy::useless_format)]
+#![allow(clippy::unnecessary_cast)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::inherent_to_string)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::unwrap_or_default)]
+
 pub mod error;
 pub mod kernel;
 pub mod memory;

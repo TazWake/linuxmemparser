@@ -10,15 +10,6 @@ macro_rules! debug {
     };
 }
 
-// Macro for conditional warning output
-macro_rules! warn {
-    ($($arg:tt)*) => {
-        if std::env::var("LINMEMPARSER_VERBOSE").is_ok() {
-            eprintln!($($arg)*);
-        }
-    };
-}
-
 // x86-64 kernel address space constants
 #[allow(dead_code)]
 const KERNEL_TEXT_BASE: u64 = 0xffffffff81000000; // _text (actual kernel text start)

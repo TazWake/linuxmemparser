@@ -20,7 +20,7 @@ pub enum AnalysisError {
     SerdeJsonError(serde_json::Error),
     RegexError(regex::Error),
     CsvError(csv::Error),
-    CsvIntoInnerError(csv::IntoInnerError<csv::Writer<Vec<u8>>>),
+    CsvIntoInnerError(Box<csv::IntoInnerError<csv::Writer<Vec<u8>>>>),
     FromUtf8Error(std::string::FromUtf8Error),
 }
 
@@ -75,7 +75,7 @@ impl From<csv::Error> for AnalysisError {
 
 impl From<csv::IntoInnerError<csv::Writer<Vec<u8>>>> for AnalysisError {
     fn from(error: csv::IntoInnerError<csv::Writer<Vec<u8>>>) -> Self {
-        AnalysisError::CsvIntoInnerError(error)
+        AnalysisError::CsvIntoInnerError(Box::new(error))
     }
 }
 
