@@ -1,7 +1,7 @@
 //! CSV output formatter for the Linux Memory Parser tool
-use crate::formats::traits::OutputFormatter;
-use crate::kernel::{ProcessInfo, ConnectionInfo, ModuleInfo};
 use crate::error::AnalysisError;
+use crate::formats::traits::OutputFormatter;
+use crate::kernel::{ConnectionInfo, ModuleInfo, ProcessInfo};
 use csv::Writer;
 
 /// CSV formatter that outputs data in comma-separated values format
@@ -10,10 +10,19 @@ pub struct CsvFormatter;
 impl OutputFormatter for CsvFormatter {
     fn format_processes(&self, processes: &[ProcessInfo]) -> Result<String, AnalysisError> {
         let mut wtr = Writer::from_writer(vec![]);
-        
+
         // Write header
-        wtr.write_record(&["pid", "ppid", "comm", "state", "start_time", "uid", "gid", "cmdline"])?;
-        
+        wtr.write_record(&[
+            "pid",
+            "ppid",
+            "comm",
+            "state",
+            "start_time",
+            "uid",
+            "gid",
+            "cmdline",
+        ])?;
+
         // Write data rows
         for proc in processes {
             wtr.write_record(&[
@@ -27,7 +36,7 @@ impl OutputFormatter for CsvFormatter {
                 proc.cmdline.clone(),
             ])?;
         }
-        
+
         wtr.flush()?;
         let data = wtr.into_inner()?;
         Ok(String::from_utf8(data)?)
@@ -35,10 +44,18 @@ impl OutputFormatter for CsvFormatter {
 
     fn format_connections(&self, connections: &[ConnectionInfo]) -> Result<String, AnalysisError> {
         let mut wtr = Writer::from_writer(vec![]);
-        
+
         // Write header
-        wtr.write_record(&["protocol", "local_addr", "local_port", "remote_addr", "remote_port", "state", "pid"])?;
-        
+        wtr.write_record(&[
+            "protocol",
+            "local_addr",
+            "local_port",
+            "remote_addr",
+            "remote_port",
+            "state",
+            "pid",
+        ])?;
+
         // Write data rows
         for conn in connections {
             wtr.write_record(&[
@@ -51,7 +68,7 @@ impl OutputFormatter for CsvFormatter {
                 conn.pid.to_string(),
             ])?;
         }
-        
+
         wtr.flush()?;
         let data = wtr.into_inner()?;
         Ok(String::from_utf8(data)?)
@@ -59,10 +76,10 @@ impl OutputFormatter for CsvFormatter {
 
     fn format_modules(&self, modules: &[ModuleInfo]) -> Result<String, AnalysisError> {
         let mut wtr = Writer::from_writer(vec![]);
-        
+
         // Write header
         wtr.write_record(&["offset", "name", "size", "address"])?;
-        
+
         // Write data rows
         for module in modules {
             wtr.write_record(&[
@@ -72,7 +89,7 @@ impl OutputFormatter for CsvFormatter {
                 format!("0x{:x}", module.address),
             ])?;
         }
-        
+
         wtr.flush()?;
         let data = wtr.into_inner()?;
         Ok(String::from_utf8(data)?)

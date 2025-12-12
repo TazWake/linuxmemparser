@@ -1,9 +1,9 @@
 //! PsTree plugin - shows process tree visualization
-use std::collections::HashMap;
-use crate::plugins::plugin_trait::{ForensicPlugin, AnalysisContext, PluginOutput};
+use crate::error::AnalysisError;
 use crate::kernel::process_extractor::ProcessExtractor;
 use crate::kernel::ProcessInfo;
-use crate::error::AnalysisError;
+use crate::plugins::plugin_trait::{AnalysisContext, ForensicPlugin, PluginOutput};
+use std::collections::HashMap;
 
 pub struct PsTreePlugin;
 
@@ -11,7 +11,7 @@ pub struct PsTreePlugin;
 pub struct ProcessTree {
     process_map: HashMap<i32, ProcessInfo>,
     parent_map: HashMap<i32, Vec<i32>>, // parent PID -> list of child PIDs
-    roots: Vec<i32>, // PID of root processes (no parents)
+    roots: Vec<i32>,                    // PID of root processes (no parents)
 }
 
 impl ProcessTree {
@@ -25,7 +25,7 @@ impl ProcessTree {
 
     pub fn build_from_processes(processes: Vec<ProcessInfo>) -> Self {
         let mut tree = ProcessTree::new();
-        
+
         // Index processes by PID
         for proc in processes {
             tree.process_map.insert(proc.pid, proc);
@@ -34,10 +34,13 @@ impl ProcessTree {
         // Build parent-child relationships
         for proc in tree.process_map.values() {
             let parent_pid = proc.ppid;
-            
+
             if tree.process_map.contains_key(&parent_pid) {
                 // This process has a parent that's in our list
-                tree.parent_map.entry(parent_pid).or_insert_with(Vec::new).push(proc.pid);
+                tree.parent_map
+                    .entry(parent_pid)
+                    .or_insert_with(Vec::new)
+                    .push(proc.pid);
             } else {
                 // This process doesn't have a parent in our list, so it's a root
                 tree.roots.push(proc.pid);
@@ -49,20 +52,22 @@ impl ProcessTree {
 
     pub fn to_string(&self) -> String {
         let mut result = String::new();
-        
+
         for &root_pid in &self.roots {
             self.add_process_to_string(root_pid, 0, &mut result);
         }
-        
+
         result
     }
 
     fn add_process_to_string(&self, pid: i32, depth: usize, result: &mut String) {
         if let Some(proc) = self.process_map.get(&pid) {
             let indent = "  ".repeat(depth);
-            result.push_str(&format!("{}{} (PID: {}, PPID: {})\n", 
-                                   indent, proc.comm, proc.pid, proc.ppid));
-            
+            result.push_str(&format!(
+                "{}{} (PID: {}, PPID: {})\n",
+                indent, proc.comm, proc.pid, proc.ppid
+            ));
+
             // Add children
             if let Some(children) = self.parent_map.get(&pid) {
                 for &child_pid in children {
@@ -91,7 +96,7 @@ impl ForensicPlugin for PsTreePlugin {
             context.memory_map,
             context.translator,
             context.symbol_resolver,
-            init_task_offset
+            init_task_offset,
         )?;
 
         // Build the process tree

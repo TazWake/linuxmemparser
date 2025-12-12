@@ -1,7 +1,7 @@
 //! JSON output formatter for the Linux Memory Parser tool
-use crate::formats::traits::OutputFormatter;
-use crate::kernel::{ProcessInfo, ConnectionInfo, ModuleInfo};
 use crate::error::AnalysisError;
+use crate::formats::traits::OutputFormatter;
+use crate::kernel::{ConnectionInfo, ModuleInfo, ProcessInfo};
 use serde_json;
 
 #[derive(serde::Serialize)]
@@ -23,7 +23,7 @@ impl OutputFormatter for JsonFormatter {
             count: processes.len(),
             results: processes.to_vec(),
         };
-        
+
         let json = serde_json::to_string_pretty(&wrapper)?;
         Ok(json)
     }
@@ -35,7 +35,7 @@ impl OutputFormatter for JsonFormatter {
             count: connections.len(),
             results: connections.to_vec(),
         };
-        
+
         let json = serde_json::to_string_pretty(&wrapper)?;
         Ok(json)
     }
@@ -47,7 +47,7 @@ impl OutputFormatter for JsonFormatter {
             count: modules.len(),
             results: modules.to_vec(),
         };
-        
+
         let json = serde_json::to_string_pretty(&wrapper)?;
         Ok(json)
     }

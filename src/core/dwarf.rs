@@ -1,16 +1,16 @@
 //! dwarf2json parser for loading Volatility 3 compatible symbol files
-use std::collections::HashMap;
-use std::fs;
+use crate::error::AnalysisError;
 use serde::Deserialize;
 use serde_json::Value;
-use crate::error::AnalysisError;
+use std::collections::HashMap;
+use std::fs;
 
 /// Symbol entry in the new format (6.x)
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct SymbolEntryNew {
     #[serde(rename = "type")]
-    symbol_type: Value,  // Can be complex, we ignore it
+    symbol_type: Value, // Can be complex, we ignore it
     address: u64,
 }
 
@@ -21,7 +21,7 @@ pub struct DwarfField {
     pub offset: usize,
     #[serde(rename = "type", default)]
     #[allow(dead_code)]
-    pub field_type: Value,  // Can be string or complex object, we don't use it
+    pub field_type: Value, // Can be string or complex object, we don't use it
 }
 
 /// Structure definition
@@ -53,7 +53,7 @@ pub struct DwarfSymbols {
     #[allow(dead_code)]
     metadata: Option<Metadata>,
     #[serde(default)]
-    symbols: HashMap<String, Value>,  // Can be old format (u64) or new format (object with address field)
+    symbols: HashMap<String, Value>, // Can be old format (u64) or new format (object with address field)
     #[serde(default)]
     user_types: HashMap<String, DwarfStruct>,
     #[serde(default)]
@@ -63,7 +63,7 @@ pub struct DwarfSymbols {
 
 impl DwarfSymbols {
     /// Load a dwarf2json file and parse it into symbols and structures
-    #[allow(dead_code)]  // Reserved for future symbol-based analysis
+    #[allow(dead_code)] // Reserved for future symbol-based analysis
     pub fn load_from_file(path: &std::path::Path) -> Result<Self, AnalysisError> {
         let content = fs::read_to_string(path)?;
         let dwarf: DwarfSymbols = serde_json::from_str(&content)?;
@@ -72,7 +72,7 @@ impl DwarfSymbols {
 
     /// Get the address of a symbol by name
     /// Handles both old format (direct u64) and new format (object with "address" field)
-    #[allow(dead_code)]  // Reserved for future symbol resolution
+    #[allow(dead_code)] // Reserved for future symbol resolution
     pub fn get_symbol_address(&self, name: &str) -> Option<u64> {
         self.symbols.get(name).and_then(|value| {
             // Try new format first (object with "address" field)
@@ -87,7 +87,7 @@ impl DwarfSymbols {
     }
 
     /// Get the offset of a field within a structure
-    #[allow(dead_code)]  // Reserved for future offset lookup
+    #[allow(dead_code)] // Reserved for future offset lookup
     pub fn get_field_offset(&self, struct_name: &str, field_name: &str) -> Option<usize> {
         self.user_types
             .get(struct_name)?
@@ -99,7 +99,8 @@ impl DwarfSymbols {
 
     /// Get all symbols as a HashMap of name -> address
     pub fn get_symbols(&self) -> HashMap<String, u64> {
-        self.symbols.iter()
+        self.symbols
+            .iter()
             .filter_map(|(name, value)| {
                 // Try new format first (object with "address" field)
                 if let Some(obj) = value.as_object() {
@@ -120,7 +121,8 @@ impl DwarfSymbols {
             .fields
             .as_ref()
             .map(|fields| {
-                fields.iter()
+                fields
+                    .iter()
                     .map(|(name, field)| (name.clone(), field.offset))
                     .collect()
             })
@@ -216,7 +218,10 @@ mod tests {
         temp_file.flush()?;
 
         let dwarf = DwarfSymbols::load_from_file(temp_file.path())?;
-        assert_eq!(dwarf.get_symbol_address("init_task"), Some(18446744071610414144));
+        assert_eq!(
+            dwarf.get_symbol_address("init_task"),
+            Some(18446744071610414144)
+        );
         assert_eq!(dwarf.get_field_offset("task_struct", "pid"), Some(1112));
         assert_eq!(dwarf.get_field_offset("task_struct", "comm"), Some(1320));
 

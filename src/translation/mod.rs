@@ -44,7 +44,7 @@ impl MemoryTranslator {
     pub fn new(regions: Vec<MemoryRegion>) -> Self {
         MemoryTranslator {
             regions,
-            phys_base: 0x1000000, // Default 16MB
+            phys_base: 0x1000000,                   // Default 16MB
             page_offset_4level: PAGE_OFFSET_4LEVEL, // Standard 4-level paging
             page_offset_5level: PAGE_OFFSET_5LEVEL, // Standard 5-level paging
         }
@@ -71,13 +71,13 @@ impl MemoryTranslator {
     }
 
     /// Get the current PAGE_OFFSET for 4-level paging
-    #[allow(dead_code)]  // Reserved for diagnostic/debug features
+    #[allow(dead_code)] // Reserved for diagnostic/debug features
     pub fn get_page_offset_4level(&self) -> u64 {
         self.page_offset_4level
     }
 
     /// Get the current PAGE_OFFSET for 5-level paging
-    #[allow(dead_code)]  // Reserved for diagnostic/debug features
+    #[allow(dead_code)] // Reserved for diagnostic/debug features
     pub fn get_page_offset_5level(&self) -> u64 {
         self.page_offset_5level
     }
@@ -98,7 +98,10 @@ impl MemoryTranslator {
             let offset = virtual_addr - KERNEL_MAP_BASE;
             let physical = self.phys_base + offset;
 
-            debug!("[DEBUG] Kernel text mapping: offset=0x{:x}, physical=0x{:x}", offset, physical);
+            debug!(
+                "[DEBUG] Kernel text mapping: offset=0x{:x}, physical=0x{:x}",
+                offset, physical
+            );
 
             return Some(physical);
         }
@@ -155,7 +158,9 @@ impl MemoryTranslator {
     pub fn find_region(&self, virtual_addr: u64) -> Option<&MemoryRegion> {
         // Convert virtual to physical first
         let physical_addr = self.virtual_to_physical(virtual_addr)?;
-        self.regions.iter().find(|region| region.contains(physical_addr))
+        self.regions
+            .iter()
+            .find(|region| region.contains(physical_addr))
     }
 
     /// Get all memory regions

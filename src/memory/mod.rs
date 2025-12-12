@@ -1,7 +1,7 @@
 //! Memory module for handling LIME format memory dumps
-use std::fs::File;
-use memmap2::Mmap;
 use crate::error::AnalysisError;
+use memmap2::Mmap;
+use std::fs::File;
 
 /// Structure to hold a memory region parsed from the LIME header.
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ impl MemoryRegion {
     }
 
     /// Convert a virtual address to a file offset within this region
-    #[allow(dead_code)]  // Reserved for future region-based translation
+    #[allow(dead_code)] // Reserved for future region-based translation
     pub fn virtual_to_file_offset(&self, virtual_addr: u64) -> Option<u64> {
         if self.contains(virtual_addr) {
             let offset = virtual_addr - self.start;
@@ -40,7 +40,10 @@ impl MemoryMap {
     pub fn new(file_path: &str) -> Result<Self, AnalysisError> {
         let file = File::open(file_path)?;
         let mapped = unsafe { Mmap::map(&file)? };
-        Ok(MemoryMap { _file: file, mapped })
+        Ok(MemoryMap {
+            _file: file,
+            mapped,
+        })
     }
 
     /// Check if the beginning of the file is the LIME signature.

@@ -1,24 +1,24 @@
 //! Main entry point for the Linux Memory Parser tool
 use clap::Parser;
 
-mod memory;
-mod symbols;
-mod translation;
-mod kernel;
-mod error;
 mod cli;
 mod core;
-mod plugins;
+mod error;
 mod formats;
+mod kernel;
+mod memory;
+mod plugins;
+mod symbols;
+mod translation;
 
+use cli::args::{Cli, OutputFormatArg, PluginCommand};
+use error::AnalysisError;
+use formats::traits::{OutputDestination, OutputFormat, OutputWriter};
 use memory::MemoryMap;
+use plugins::plugin_trait::{AnalysisContext, ForensicPlugin, PluginOutput};
+use plugins::{FilesPlugin, ModulesPlugin, NetStatPlugin, PsListPlugin, PsTreePlugin};
 use symbols::SymbolResolver;
 use translation::MemoryTranslator;
-use error::AnalysisError;
-use cli::args::{Cli, PluginCommand, OutputFormatArg};
-use formats::traits::{OutputFormat, OutputDestination, OutputWriter};
-use plugins::plugin_trait::{ForensicPlugin, AnalysisContext, PluginOutput};
-use plugins::{PsListPlugin, PsTreePlugin, NetStatPlugin, ModulesPlugin, FilesPlugin};
 
 // Macro for conditional debug output
 macro_rules! debug {
@@ -46,7 +46,8 @@ fn main() -> Result<(), AnalysisError> {
     if cli.debug {
         std::env::set_var("LINMEMPARSER_DEBUG", "1");
     }
-    if cli.verbose || cli.debug {  // Debug implies verbose
+    if cli.verbose || cli.debug {
+        // Debug implies verbose
         std::env::set_var("LINMEMPARSER_VERBOSE", "1");
     }
 
@@ -72,12 +73,17 @@ fn main() -> Result<(), AnalysisError> {
         warn!("LIME header detected. Parsing memory region information:");
         if let Some(regs) = memory_map.parse_lime_header() {
             for (i, region) in regs.iter().enumerate() {
-                warn!("Region {}: Start: 0x{:x}, End: 0x{:x}, FileOffset: {}",
-                    i, region.start, region.end, region.file_offset);
+                warn!(
+                    "Region {}: Start: 0x{:x}, End: 0x{:x}, FileOffset: {}",
+                    i, region.start, region.end, region.file_offset
+                );
             }
 
             // For now, we'll just print the regions to show the translator works
-            warn!("Memory translator will be initialized with {} regions", regs.len());
+            warn!(
+                "Memory translator will be initialized with {} regions",
+                regs.len()
+            );
             Some(regs)
         } else {
             warn!("LIME header detected, but no memory regions were found.");
@@ -114,32 +120,41 @@ fn main() -> Result<(), AnalysisError> {
             match symbol_resolver.load_dwarf2json(&path_str) {
                 Ok(_) => {
                     warn!("Successfully loaded symbols and structure offsets from dwarf2json file");
-                },
+                }
                 Err(e) => {
                     debug!("[DEBUG] Failed to load as dwarf2json: {}", e);
                     debug!("[DEBUG] Trying as System.map format...");
                     // Try as System.map format
-                    symbol_resolver.load_system_map(&path_str)
-                        .map_err(|_| AnalysisError::SymbolError("Failed to load symbols".to_string()))?;
+                    symbol_resolver.load_system_map(&path_str).map_err(|_| {
+                        AnalysisError::SymbolError("Failed to load symbols".to_string())
+                    })?;
                     warn!("Successfully loaded symbols from System.map format");
                 }
             }
         } else if path_str.contains("kallsyms") {
             // Try kallsyms format (handles 0 addresses differently)
-            symbol_resolver.load_kallsyms(&path_str)
+            symbol_resolver
+                .load_kallsyms(&path_str)
                 .map_err(|_| AnalysisError::SymbolError("Failed to load kallsyms".to_string()))?;
             warn!("Successfully loaded symbols from kallsyms format");
         } else {
             // Assume System.map format
-            symbol_resolver.load_system_map(&path_str)
+            symbol_resolver
+                .load_system_map(&path_str)
                 .map_err(|_| AnalysisError::SymbolError("Failed to load symbols".to_string()))?;
             warn!("Successfully loaded symbols from System.map format");
         }
     } else {
         // Try to locate symbols via heuristic search
         if let Some(marker_offset) = SymbolResolver::detect_symbol_table(mapped) {
-            warn!("Kernel symbol table marker found at offset: 0x{:x}", marker_offset);
-            warn!("Symbol resolver initialized with {} symbols", symbol_resolver.symbol_count());
+            warn!(
+                "Kernel symbol table marker found at offset: 0x{:x}",
+                marker_offset
+            );
+            warn!(
+                "Symbol resolver initialized with {} symbols",
+                symbol_resolver.symbol_count()
+            );
         } else {
             warn!("Kernel symbol table marker not detected, continuing with heuristic search...");
         }
@@ -152,8 +167,10 @@ fn main() -> Result<(), AnalysisError> {
 
         // Warn if System.map might not match
         if cli.symbols.is_some() {
-            warn!("Note: Verify that System.map matches kernel version {}.{}",
-                     version.major, version.minor);
+            warn!(
+                "Note: Verify that System.map matches kernel version {}.{}",
+                version.major, version.minor
+            );
             warn!("      Mismatched versions can cause incorrect structure offsets.");
         }
     } else {
@@ -180,23 +197,36 @@ fn main() -> Result<(), AnalysisError> {
 
     if phys_base_candidates.is_empty() {
         warn!("[WARNING] Could not calculate phys_base candidates from _text symbol");
-        warn!("Using default phys_base: 0x{:x}", translator.get_phys_base());
+        warn!(
+            "Using default phys_base: 0x{:x}",
+            translator.get_phys_base()
+        );
         warn!("This may cause incorrect address translation - ensure symbol file contains _text");
     } else {
         warn!("Recalculating phys_base using found init_task location...");
-        warn!("Testing {} phys_base candidate(s)...", phys_base_candidates.len());
+        warn!(
+            "Testing {} phys_base candidate(s)...",
+            phys_base_candidates.len()
+        );
 
         let mut found_valid_phys_base = false;
 
         // Get the virtual address of init_task from symbols (if available)
         if let Some(init_task_vaddr) = symbol_resolver.get_symbol_address("init_task") {
             // Get PID offset from structure definitions
-            let pid_offset = symbol_resolver.get_struct_field_offset("task_struct", "pid", None)
+            let pid_offset = symbol_resolver
+                .get_struct_field_offset("task_struct", "pid", None)
                 .unwrap_or(2384); // Fallback to common offset if not in symbols
 
             debug!("[DEBUG] Validating phys_base candidates:");
-            debug!("[DEBUG]   init_task vaddr from symbols: 0x{:x}", init_task_vaddr);
-            debug!("[DEBUG]   init_task file offset found: 0x{:x}", init_task_offset);
+            debug!(
+                "[DEBUG]   init_task vaddr from symbols: 0x{:x}",
+                init_task_vaddr
+            );
+            debug!(
+                "[DEBUG]   init_task file offset found: 0x{:x}",
+                init_task_offset
+            );
             debug!("[DEBUG]   PID offset in task_struct: 0x{:x}", pid_offset);
 
             // Validate each candidate by checking if it correctly translates init_task vaddr to the found file offset
@@ -204,9 +234,14 @@ fn main() -> Result<(), AnalysisError> {
                 translator.set_phys_base(candidate);
 
                 // Try to translate init_task virtual address with this phys_base
-                if let Some(translated_offset) = translator.virtual_to_file_offset(init_task_vaddr) {
-                    debug!("[DEBUG]   Candidate {}: phys_base=0x{:x} translates to file_offset=0x{:x}",
-                             i + 1, candidate, translated_offset);
+                if let Some(translated_offset) = translator.virtual_to_file_offset(init_task_vaddr)
+                {
+                    debug!(
+                        "[DEBUG]   Candidate {}: phys_base=0x{:x} translates to file_offset=0x{:x}",
+                        i + 1,
+                        candidate,
+                        translated_offset
+                    );
 
                     // Check if this translation matches the init_task offset we found via heuristic search
                     // Allow a small tolerance for structure alignment
@@ -216,12 +251,18 @@ fn main() -> Result<(), AnalysisError> {
                         init_task_offset as u64 - translated_offset
                     };
 
-                    if offset_diff < 0x1000 { // Within 4KB tolerance
+                    if offset_diff < 0x1000 {
+                        // Within 4KB tolerance
                         // Verify by reading PID at the found location
                         let pid_file_offset = init_task_offset + pid_offset as usize;
                         if pid_file_offset + 4 <= mapped.len() {
                             let pid_bytes = &mapped[pid_file_offset..pid_file_offset + 4];
-                            let pid = i32::from_le_bytes([pid_bytes[0], pid_bytes[1], pid_bytes[2], pid_bytes[3]]);
+                            let pid = i32::from_le_bytes([
+                                pid_bytes[0],
+                                pid_bytes[1],
+                                pid_bytes[2],
+                                pid_bytes[3],
+                            ]);
 
                             debug!("[DEBUG]     Translation matches found init_task (offset_diff=0x{:x}), PID={}",
                                      offset_diff, pid);
@@ -233,10 +274,17 @@ fn main() -> Result<(), AnalysisError> {
                             }
                         }
                     } else {
-                        debug!("[DEBUG]     Translation doesn't match (offset_diff=0x{:x})", offset_diff);
+                        debug!(
+                            "[DEBUG]     Translation doesn't match (offset_diff=0x{:x})",
+                            offset_diff
+                        );
                     }
                 } else {
-                    debug!("[DEBUG]   Candidate {}: phys_base=0x{:x} - translation failed", i + 1, candidate);
+                    debug!(
+                        "[DEBUG]   Candidate {}: phys_base=0x{:x} - translation failed",
+                        i + 1,
+                        candidate
+                    );
                 }
             }
 
@@ -254,28 +302,45 @@ fn main() -> Result<(), AnalysisError> {
 
                 // Find which region contains our init_task file offset
                 for region in translator.get_regions() {
-                    if init_task_offset >= region.file_offset as usize &&
-                       init_task_offset < (region.file_offset + (region.end - region.start)) as usize {
+                    if init_task_offset >= region.file_offset as usize
+                        && init_task_offset
+                            < (region.file_offset + (region.end - region.start)) as usize
+                    {
                         // Calculate the physical address of init_task from the file offset
                         let offset_in_region = init_task_offset as u64 - region.file_offset;
                         let physical_addr = region.start + offset_in_region;
 
-                        debug!("[DEBUG] Found init_task in region: start=0x{:x}, end=0x{:x}",
-                                 region.start, region.end);
+                        debug!(
+                            "[DEBUG] Found init_task in region: start=0x{:x}, end=0x{:x}",
+                            region.start, region.end
+                        );
                         debug!("[DEBUG]   File offset in region: 0x{:x}", offset_in_region);
-                        debug!("[DEBUG]   Physical address of init_task: 0x{:x}", physical_addr);
-                        debug!("[DEBUG]   Virtual address from symbols: 0x{:x}", init_task_vaddr);
+                        debug!(
+                            "[DEBUG]   Physical address of init_task: 0x{:x}",
+                            physical_addr
+                        );
+                        debug!(
+                            "[DEBUG]   Virtual address from symbols: 0x{:x}",
+                            init_task_vaddr
+                        );
 
                         // Calculate phys_base using the kernel mapping formula:
                         // For kernel text (0xffffffff80000000+): physical = phys_base + (virtual - 0xffffffff80000000)
                         // Rearranging: phys_base = physical - (virtual - 0xffffffff80000000)
                         const KERNEL_MAP_BASE: u64 = 0xffffffff80000000;
-                        let calculated_phys_base = physical_addr.wrapping_sub(init_task_vaddr - KERNEL_MAP_BASE);
+                        let calculated_phys_base =
+                            physical_addr.wrapping_sub(init_task_vaddr - KERNEL_MAP_BASE);
 
-                        debug!("[DEBUG]   Calculated phys_base: 0x{:x}", calculated_phys_base);
+                        debug!(
+                            "[DEBUG]   Calculated phys_base: 0x{:x}",
+                            calculated_phys_base
+                        );
                         translator.set_phys_base(calculated_phys_base);
 
-                        warn!("✓ Calculated phys_base from memory region: 0x{:x}", calculated_phys_base);
+                        warn!(
+                            "✓ Calculated phys_base from memory region: 0x{:x}",
+                            calculated_phys_base
+                        );
                         found_valid_phys_base = true;
                         break;
                     }
@@ -298,21 +363,25 @@ fn main() -> Result<(), AnalysisError> {
     debug!("[DEBUG] Detecting PAGE_OFFSET using candidate validation approach...");
 
     // Get structure field offsets
-    let tasks_offset = symbol_resolver.get_struct_field_offset("task_struct", "tasks", None)
+    let tasks_offset = symbol_resolver
+        .get_struct_field_offset("task_struct", "tasks", None)
         .unwrap_or(0xa00) as usize;
-    let pid_offset = symbol_resolver.get_struct_field_offset("task_struct", "pid", None)
+    let pid_offset = symbol_resolver
+        .get_struct_field_offset("task_struct", "pid", None)
         .unwrap_or(0xad0) as usize;
-    let comm_offset = symbol_resolver.get_struct_field_offset("task_struct", "comm", None)
+    let comm_offset = symbol_resolver
+        .get_struct_field_offset("task_struct", "comm", None)
         .unwrap_or(0xcf0) as usize;
-    let state_offset = symbol_resolver.get_struct_field_offset("task_struct", "__state", None)
+    let state_offset = symbol_resolver
+        .get_struct_field_offset("task_struct", "__state", None)
         .or_else(|| symbol_resolver.get_struct_field_offset("task_struct", "state", None))
         .unwrap_or(0x18) as usize;
 
     // Read tasks.next pointer from init_task
-    let tasks_next_ptr = kernel::KernelParser::read_u64(
-        mapped,
-        init_task_offset + tasks_offset
-    ).ok_or_else(|| AnalysisError::ParseError("Failed to read tasks.next from init_task".to_string()))?;
+    let tasks_next_ptr = kernel::KernelParser::read_u64(mapped, init_task_offset + tasks_offset)
+        .ok_or_else(|| {
+            AnalysisError::ParseError("Failed to read tasks.next from init_task".to_string())
+        })?;
 
     debug!("[DEBUG] tasks.next from init_task: 0x{:x}", tasks_next_ptr);
 
@@ -381,7 +450,10 @@ fn main() -> Result<(), AnalysisError> {
             if !has_alpha {
                 return None;
             }
-            if !comm.chars().all(|c| c.is_ascii_graphic() || c.is_whitespace()) {
+            if !comm
+                .chars()
+                .all(|c| c.is_ascii_graphic() || c.is_whitespace())
+            {
                 return None;
             }
             score += comm.len() as u32 * 10;
@@ -412,11 +484,14 @@ fn main() -> Result<(), AnalysisError> {
         // Generate PAGE_OFFSET candidates
         let candidates = generate_page_offset_candidates();
         let candidates_count = candidates.len();
-        debug!("[DEBUG] Testing {} PAGE_OFFSET candidates...", candidates_count);
+        debug!(
+            "[DEBUG] Testing {} PAGE_OFFSET candidates...",
+            candidates_count
+        );
 
         struct ValidCandidate {
             page_offset: u64,
-            #[allow(dead_code)]  // Reserved for future use
+            #[allow(dead_code)] // Reserved for future use
             file_offset: usize,
             score: u32,
             comm: String,
@@ -432,15 +507,18 @@ fn main() -> Result<(), AnalysisError> {
             let next_task_phys = tasks_next_ptr.wrapping_sub(candidate_page_offset);
 
             // Check if physical address is within ANY captured memory region
-            let is_within_regions = translator.get_regions()
+            let is_within_regions = translator
+                .get_regions()
                 .iter()
                 .any(|region| next_task_phys >= region.start && next_task_phys <= region.end);
 
             if !is_within_regions {
                 // Only log first 10 rejections to avoid spam
                 if rejections_logged < 10 {
-                    debug!("[DEBUG] Skipping candidate 0x{:x}: physical 0x{:x} not in any region",
-                              candidate_page_offset, next_task_phys);
+                    debug!(
+                        "[DEBUG] Skipping candidate 0x{:x}: physical 0x{:x} not in any region",
+                        candidate_page_offset, next_task_phys
+                    );
                     rejections_logged += 1;
                 }
                 continue;
@@ -459,8 +537,10 @@ fn main() -> Result<(), AnalysisError> {
             // Validate task_struct at this location
             if let Some((score, comm)) = validate_next_task_candidate(task_struct_base) {
                 // Determine paging level (4-level vs 5-level)
-                let diff_4level = (candidate_page_offset as i64 - 0xffff880000000000u64 as i64).abs();
-                let diff_5level = (candidate_page_offset as i64 - 0xffff888000000000u64 as i64).abs();
+                let diff_4level =
+                    (candidate_page_offset as i64 - 0xffff880000000000u64 as i64).abs();
+                let diff_5level =
+                    (candidate_page_offset as i64 - 0xffff888000000000u64 as i64).abs();
                 let is_4level = diff_4level < diff_5level;
 
                 debug!("[DEBUG] ✓ Valid candidate: PAGE_OFFSET=0x{:x}, task_base=0x{:x}, comm='{}', score={}",
@@ -468,7 +548,7 @@ fn main() -> Result<(), AnalysisError> {
 
                 valid_candidates.push(ValidCandidate {
                     page_offset: candidate_page_offset,
-                    file_offset: task_struct_base,  // Store the base, not the tasks field offset
+                    file_offset: task_struct_base, // Store the base, not the tasks field offset
                     score,
                     comm,
                     is_4level,
@@ -478,23 +558,36 @@ fn main() -> Result<(), AnalysisError> {
 
         // Log summary of candidate validation
         if rejections_logged >= 10 {
-            debug!("[DEBUG] Tested {} candidates, found {} valid (showing only first 10 rejections)",
-                     candidates_count, valid_candidates.len());
+            debug!(
+                "[DEBUG] Tested {} candidates, found {} valid (showing only first 10 rejections)",
+                candidates_count,
+                valid_candidates.len()
+            );
         }
 
         // Choose best candidate by score
         if !valid_candidates.is_empty() {
             valid_candidates.sort_by(|a, b| b.score.cmp(&a.score));
 
-            debug!("[DEBUG] Found {} valid PAGE_OFFSET candidates:", valid_candidates.len());
+            debug!(
+                "[DEBUG] Found {} valid PAGE_OFFSET candidates:",
+                valid_candidates.len()
+            );
             for (i, cand) in valid_candidates.iter().take(5).enumerate() {
-                debug!("[DEBUG]   {}. PAGE_OFFSET=0x{:x}, comm='{}', score={}",
-                         i+1, cand.page_offset, cand.comm, cand.score);
+                debug!(
+                    "[DEBUG]   {}. PAGE_OFFSET=0x{:x}, comm='{}', score={}",
+                    i + 1,
+                    cand.page_offset,
+                    cand.comm,
+                    cand.score
+                );
             }
 
             let best = &valid_candidates[0];
-            debug!("[DEBUG] ✓ Selected best candidate: PAGE_OFFSET=0x{:x}, comm='{}'",
-                     best.page_offset, best.comm);
+            debug!(
+                "[DEBUG] ✓ Selected best candidate: PAGE_OFFSET=0x{:x}, comm='{}'",
+                best.page_offset, best.comm
+            );
 
             // Set PAGE_OFFSET based on paging level
             if best.is_4level {
@@ -505,7 +598,10 @@ fn main() -> Result<(), AnalysisError> {
                 translator.set_page_offset_5level(best.page_offset);
             }
 
-            warn!("✓ Successfully detected PAGE_OFFSET: 0x{:x}", best.page_offset);
+            warn!(
+                "✓ Successfully detected PAGE_OFFSET: 0x{:x}",
+                best.page_offset
+            );
         } else {
             warn!("[WARNING] Could not detect PAGE_OFFSET using candidate validation");
             debug!("[DEBUG] Attempting to derive PAGE_OFFSET from init_task...");
@@ -515,12 +611,18 @@ fn main() -> Result<(), AnalysisError> {
                 mapped,
                 &translator,
                 init_task_offset,
-                tasks_offset
+                tasks_offset,
             ) {
-                debug!("[DEBUG] ✓ Successfully derived PAGE_OFFSET: 0x{:x}", derived_offset);
+                debug!(
+                    "[DEBUG] ✓ Successfully derived PAGE_OFFSET: 0x{:x}",
+                    derived_offset
+                );
                 translator.set_page_offset_5level(derived_offset);
-                translator.set_page_offset_4level(derived_offset);  // Set both to same value for KASLR
-                warn!("✓ Derived PAGE_OFFSET from init_task: 0x{:x}", derived_offset);
+                translator.set_page_offset_4level(derived_offset); // Set both to same value for KASLR
+                warn!(
+                    "✓ Derived PAGE_OFFSET from init_task: 0x{:x}",
+                    derived_offset
+                );
             } else {
                 warn!("[WARNING] Could not derive PAGE_OFFSET - using defaults");
                 warn!("[WARNING] Direct mapping translations may be incorrect");
@@ -536,7 +638,7 @@ fn main() -> Result<(), AnalysisError> {
         memory_map: &memory_map,
         translator: &translator,
         symbol_resolver: &symbol_resolver,
-        init_task_offset,  // Pass the KASLR-adjusted init_task offset
+        init_task_offset, // Pass the KASLR-adjusted init_task offset
     };
 
     // Determine output format and destination
@@ -644,8 +746,7 @@ fn execute_plugin(
             }
             if let Some(name_pattern) = filter_name {
                 use regex::Regex;
-                let re = Regex::new(name_pattern)
-                    .map_err(|e| AnalysisError::RegexError(e))?;
+                let re = Regex::new(name_pattern).map_err(|e| AnalysisError::RegexError(e))?;
                 processes.retain(|p| re.is_match(&p.comm));
             }
 

@@ -1,8 +1,8 @@
 //! Symbol resolution module for finding kernel symbols
+use crate::error::AnalysisError;
 use memchr::memmem;
 use std::collections::HashMap;
 use std::io::BufRead;
-use crate::error::AnalysisError;
 
 // Macro for conditional debug output
 macro_rules! debug {
@@ -51,7 +51,12 @@ impl SymbolResolver {
 
     /// Perform a heuristic search for a kernel symbol table marker
     pub fn detect_symbol_table(mapped: &[u8]) -> Option<usize> {
-        let markers = ["kallsyms", "kallsyms_addresses", "kallsyms_names", "kallsyms_num"];
+        let markers = [
+            "kallsyms",
+            "kallsyms_addresses",
+            "kallsyms_names",
+            "kallsyms_num",
+        ];
         for marker in markers.iter() {
             if let Some(pos) = memmem::find(mapped, marker.as_bytes()) {
                 return Some(pos);
@@ -134,17 +139,19 @@ impl SymbolResolver {
     /// Returns (kaslr_offset, actual_init_task_file_offset)
     /// Heuristic search for init_task by finding "swapper" string in memory
     /// This is a fallback when KASLR detection fails
-    fn find_init_task_by_swapper_string(
-        &self,
-        memory: &[u8],
-    ) -> Option<usize> {
-        debug!("[DEBUG] Attempting heuristic search for init_task by scanning for 'swapper' string...");
+    fn find_init_task_by_swapper_string(&self, memory: &[u8]) -> Option<usize> {
+        debug!(
+            "[DEBUG] Attempting heuristic search for init_task by scanning for 'swapper' string..."
+        );
 
-        let comm_offset = self.get_struct_field_offset_fallback("task_struct", "comm")
+        let comm_offset = self
+            .get_struct_field_offset_fallback("task_struct", "comm")
             .unwrap_or(0xcf0) as usize;
-        let pid_offset = self.get_struct_field_offset_fallback("task_struct", "pid")
+        let pid_offset = self
+            .get_struct_field_offset_fallback("task_struct", "pid")
             .unwrap_or(0xad0) as usize;
-        let tasks_offset = self.get_struct_field_offset_fallback("task_struct", "tasks")
+        let tasks_offset = self
+            .get_struct_field_offset_fallback("task_struct", "tasks")
             .unwrap_or(0xa00) as usize;
 
         // Search for "swapper" string
@@ -166,20 +173,34 @@ impl SymbolResolver {
                 continue;
             }
 
-            if let Some(pid) = crate::kernel::KernelParser::read_i32(memory, potential_task_struct + pid_offset) {
+            if let Some(pid) =
+                crate::kernel::KernelParser::read_i32(memory, potential_task_struct + pid_offset)
+            {
                 if pid == 0 {
                     debug!("[DEBUG] Found 'swapper' at offset 0x{:x}, potential task_struct at 0x{:x}, PID={}",
                              match_pos, potential_task_struct, pid);
 
                     // Validate: check tasks.next pointer
                     if potential_task_struct + tasks_offset + 8 <= memory.len() {
-                        if let Some(tasks_next) = crate::kernel::KernelParser::read_u64(memory, potential_task_struct + tasks_offset) {
+                        if let Some(tasks_next) = crate::kernel::KernelParser::read_u64(
+                            memory,
+                            potential_task_struct + tasks_offset,
+                        ) {
                             const MIN_KERNEL_ADDR: u64 = 0xffff800000000000;
                             const MAX_KERNEL_ADDR: u64 = 0xfffffffffff00000;
 
-                            if tasks_next >= MIN_KERNEL_ADDR && tasks_next < MAX_KERNEL_ADDR && tasks_next != 0xffffffffffffffff {
-                                debug!("[DEBUG] ✓ Valid init_task found at file offset 0x{:x}", potential_task_struct);
-                                debug!("[DEBUG] ✓ comm='swapper', PID=0, tasks.next=0x{:x}", tasks_next);
+                            if tasks_next >= MIN_KERNEL_ADDR
+                                && tasks_next < MAX_KERNEL_ADDR
+                                && tasks_next != 0xffffffffffffffff
+                            {
+                                debug!(
+                                    "[DEBUG] ✓ Valid init_task found at file offset 0x{:x}",
+                                    potential_task_struct
+                                );
+                                debug!(
+                                    "[DEBUG] ✓ comm='swapper', PID=0, tasks.next=0x{:x}",
+                                    tasks_next
+                                );
                                 return Some(potential_task_struct);
                             } else {
                                 debug!("[DEBUG]   - Rejected: tasks.next=0x{:x} not a valid kernel address", tasks_next);
@@ -190,7 +211,10 @@ impl SymbolResolver {
             }
         }
 
-        debug!("[DEBUG] Scanned {} 'swapper' occurrences, none matched init_task criteria", matches);
+        debug!(
+            "[DEBUG] Scanned {} 'swapper' occurrences, none matched init_task criteria",
+            matches
+        );
         None
     }
 
@@ -202,19 +226,27 @@ impl SymbolResolver {
         // Get the static init_task address from symbols
         let static_init_task = self.get_symbol_address("init_task")?;
 
-        debug!("[DEBUG] Static init_task address from dwarf2json: 0x{:x}", static_init_task);
+        debug!(
+            "[DEBUG] Static init_task address from dwarf2json: 0x{:x}",
+            static_init_task
+        );
 
         // Get the PID offset and tasks offset
-        let pid_offset = self.get_struct_field_offset_fallback("task_struct", "pid")
+        let pid_offset = self
+            .get_struct_field_offset_fallback("task_struct", "pid")
             .unwrap_or(0xad0) as usize;
-        let tasks_offset = self.get_struct_field_offset_fallback("task_struct", "tasks")
+        let tasks_offset = self
+            .get_struct_field_offset_fallback("task_struct", "tasks")
             .unwrap_or(0xa00) as usize;
-        let comm_offset = self.get_struct_field_offset_fallback("task_struct", "comm")
+        let comm_offset = self
+            .get_struct_field_offset_fallback("task_struct", "comm")
             .unwrap_or(0xcf0) as usize;
 
         debug!("[DEBUG] Attempting to detect KASLR offset...");
-        debug!("[DEBUG] Using offsets: pid=0x{:x}, tasks=0x{:x}, comm=0x{:x}",
-                 pid_offset, tasks_offset, comm_offset);
+        debug!(
+            "[DEBUG] Using offsets: pid=0x{:x}, tasks=0x{:x}, comm=0x{:x}",
+            pid_offset, tasks_offset, comm_offset
+        );
 
         // Try different KASLR offsets (typically aligned to 0x100000 = 1MB)
         // KASLR can shift the kernel by 0 to ~512MB in 1MB increments
@@ -229,7 +261,10 @@ impl SymbolResolver {
 
                 // Check if we can read a PID at this location
                 if file_offset_usize + pid_offset + 4 <= memory.len() {
-                    if let Some(pid) = crate::kernel::KernelParser::read_i32(memory, file_offset_usize + pid_offset) {
+                    if let Some(pid) = crate::kernel::KernelParser::read_i32(
+                        memory,
+                        file_offset_usize + pid_offset,
+                    ) {
                         if pid == 0 {
                             // Verify this is a real task_struct, not a zero-filled page
                             // Check that at least SOME fields are non-zero
@@ -237,7 +272,10 @@ impl SymbolResolver {
                             let sample_offsets = [0usize, 8, 16, 24, 32, 40, 48, 56, 64, 72]; // Sample 10 locations
                             for &sample_off in &sample_offsets {
                                 if file_offset_usize + sample_off + 8 <= memory.len() {
-                                    if let Some(val) = crate::kernel::KernelParser::read_u64(memory, file_offset_usize + sample_off) {
+                                    if let Some(val) = crate::kernel::KernelParser::read_u64(
+                                        memory,
+                                        file_offset_usize + sample_off,
+                                    ) {
                                         if val != 0 {
                                             non_zero_count += 1;
                                         }
@@ -250,7 +288,10 @@ impl SymbolResolver {
                                 // CRITICAL: Also verify that tasks.next pointer is non-zero
                                 // The tasks field is a list_head, so tasks.next is at tasks_offset
                                 if file_offset_usize + tasks_offset + 8 <= memory.len() {
-                                    if let Some(tasks_next) = crate::kernel::KernelParser::read_u64(memory, file_offset_usize + tasks_offset) {
+                                    if let Some(tasks_next) = crate::kernel::KernelParser::read_u64(
+                                        memory,
+                                        file_offset_usize + tasks_offset,
+                                    ) {
                                         if tasks_next == 0 {
                                             if debug_failures_logged < 10 {
                                                 debug!("[DEBUG] Found PID 0 at 0x{:x} but tasks.next is NULL - not a valid circular list - skipping",
@@ -267,7 +308,9 @@ impl SymbolResolver {
                                         const MIN_KERNEL_ADDR: u64 = 0xffff800000000000;
                                         const MAX_KERNEL_ADDR: u64 = 0xfffffffffff00000; // Leave room for kernel end
 
-                                        if tasks_next < MIN_KERNEL_ADDR || tasks_next >= MAX_KERNEL_ADDR {
+                                        if tasks_next < MIN_KERNEL_ADDR
+                                            || tasks_next >= MAX_KERNEL_ADDR
+                                        {
                                             if debug_failures_logged < 10 {
                                                 debug!("[DEBUG] Found PID 0 at 0x{:x} but tasks.next=0x{:x} is not a valid kernel address - skipping",
                                                          test_addr, tasks_next);
@@ -277,7 +320,9 @@ impl SymbolResolver {
                                         }
 
                                         // Reject sentinel values
-                                        if tasks_next == 0xffffffffffffffff || tasks_next == 0xfffffffffffffffe {
+                                        if tasks_next == 0xffffffffffffffff
+                                            || tasks_next == 0xfffffffffffffffe
+                                        {
                                             if debug_failures_logged < 10 {
                                                 debug!("[DEBUG] Found PID 0 at 0x{:x} but tasks.next=0x{:x} is a sentinel value - skipping",
                                                          test_addr, tasks_next);
@@ -288,8 +333,12 @@ impl SymbolResolver {
 
                                         // CRITICAL: For init_task, comm MUST be "swapper" or "swapper/N"
                                         // This is a kernel constant and the most reliable validation
-                                        let comm = crate::kernel::KernelParser::read_string(memory, file_offset_usize + comm_offset, 16)
-                                            .unwrap_or_else(|| String::new());
+                                        let comm = crate::kernel::KernelParser::read_string(
+                                            memory,
+                                            file_offset_usize + comm_offset,
+                                            16,
+                                        )
+                                        .unwrap_or_else(|| String::new());
                                         let comm_trimmed = comm.trim_end_matches('\0');
 
                                         // Strict validation: must start with "swapper"
@@ -309,8 +358,10 @@ impl SymbolResolver {
                                         debug!("[DEBUG] ✓ tasks.next = 0x{:x} (valid kernel virtual address)",
                                                  tasks_next);
                                         debug!("[DEBUG] ✓ comm = {:?} (valid ASCII)", comm_trimmed);
-                                        debug!("[DEBUG] ✓ KASLR offset detected: {} MB (0x{:x} bytes)",
-                                                 kaslr_offset, offset_bytes);
+                                        debug!(
+                                            "[DEBUG] ✓ KASLR offset detected: {} MB (0x{:x} bytes)",
+                                            kaslr_offset, offset_bytes
+                                        );
                                         return Some((offset_bytes, file_offset_usize));
                                     }
                                 }
@@ -348,7 +399,7 @@ impl SymbolResolver {
     ///
     /// For compatibility with existing code. Returns the first candidate value.
     /// For better results, use calculate_phys_base_candidates() and validate.
-    #[allow(dead_code)]  // May be used by future plugins
+    #[allow(dead_code)] // May be used by future plugins
     pub fn calculate_phys_base(&self) -> Option<u64> {
         self.calculate_phys_base_candidates().first().copied()
     }
@@ -358,7 +409,11 @@ impl SymbolResolver {
     /// This method has a circular dependency: it needs phys_base for address translation
     /// but is trying to read phys_base from memory. Use calculate_phys_base() instead.
     #[allow(dead_code)]
-    pub fn read_phys_base(&self, translator: &crate::translation::MemoryTranslator, mapped: &[u8]) -> Option<u64> {
+    pub fn read_phys_base(
+        &self,
+        translator: &crate::translation::MemoryTranslator,
+        mapped: &[u8],
+    ) -> Option<u64> {
         // Get the virtual address of the phys_base variable
         let phys_base_vaddr = self.get_symbol_address("phys_base")?;
 
@@ -376,7 +431,9 @@ impl SymbolResolver {
 
     /// Extract kernel version from System.map file by looking for linux_banner symbol
     #[allow(dead_code)]
-    pub fn extract_kernel_version_from_system_map(_file_path: &str) -> Option<crate::core::offsets::KernelVersion> {
+    pub fn extract_kernel_version_from_system_map(
+        _file_path: &str,
+    ) -> Option<crate::core::offsets::KernelVersion> {
         // System.map doesn't directly contain version, but we can try to find it
         // by looking for version-related symbols or comments
         // For now, return None - version should be detected from memory dump
@@ -402,7 +459,9 @@ impl SymbolResolver {
 
                 // Validate symbol type (System.map uses single letter types like T, D, etc.)
                 if symbol_type.len() == 1 {
-                    if let Ok(address) = u64::from_str_radix(address_str.trim_start_matches("0x"), 16) {
+                    if let Ok(address) =
+                        u64::from_str_radix(address_str.trim_start_matches("0x"), 16)
+                    {
                         self.add_symbol(symbol_name.to_string(), address);
                     }
                 }
@@ -442,7 +501,7 @@ impl SymbolResolver {
                         // as they're not useful for address translation
                         continue;
                     }
-                    
+
                     // Validate symbol type (kallsyms uses single letter types like T, D, etc.)
                     if symbol_type.len() == 1 {
                         self.add_symbol(symbol_name.to_string(), address);
@@ -457,10 +516,12 @@ impl SymbolResolver {
     /// Load symbols from dwarf2json format
     pub fn load_dwarf2json(&mut self, file_path: &str) -> Result<(), AnalysisError> {
         use std::fs;
-        
+
         let content = fs::read_to_string(file_path)?;
-        let dwarf: crate::core::dwarf::DwarfSymbols = serde_json::from_str(&content)
-            .map_err(|e| AnalysisError::SymbolError(format!("Failed to parse dwarf2json: {}", e)))?;
+        let dwarf: crate::core::dwarf::DwarfSymbols =
+            serde_json::from_str(&content).map_err(|e| {
+                AnalysisError::SymbolError(format!("Failed to parse dwarf2json: {}", e))
+            })?;
 
         // Load symbols (convert from HashMap to iterator)
         let symbols = dwarf.get_symbols();
@@ -474,14 +535,24 @@ impl SymbolResolver {
         let structs_to_load = vec!["task_struct", "cred"];
         for struct_name in structs_to_load {
             if let Some(fields) = dwarf.get_struct_offsets(struct_name) {
-                debug!("[DEBUG] Loaded {} fields for struct '{}':", fields.len(), struct_name);
+                debug!(
+                    "[DEBUG] Loaded {} fields for struct '{}':",
+                    fields.len(),
+                    struct_name
+                );
                 for (field_name, offset) in fields {
                     let key = format!("{}::{}", struct_name, field_name);
-                    debug!("[DEBUG]   {}::{} = 0x{:x} ({} bytes)", struct_name, field_name, offset, offset);
+                    debug!(
+                        "[DEBUG]   {}::{} = 0x{:x} ({} bytes)",
+                        struct_name, field_name, offset, offset
+                    );
                     self.struct_offsets.insert(key, offset);
                 }
             } else {
-                warn!("[WARNING] No fields found for struct '{}' in dwarf2json", struct_name);
+                warn!(
+                    "[WARNING] No fields found for struct '{}' in dwarf2json",
+                    struct_name
+                );
             }
         }
 
@@ -492,7 +563,7 @@ impl SymbolResolver {
             ("task_struct", "tasks"),
             ("task_struct", "parent"),
             ("task_struct", "state"),
-            ("task_struct", "__state"),  // Renamed in kernel 5.14+
+            ("task_struct", "__state"), // Renamed in kernel 5.14+
         ];
         debug!("[DEBUG] Checking critical field offsets:");
         for (struct_name, field_name) in critical_fields {
@@ -501,20 +572,23 @@ impl SymbolResolver {
                 Some(offset) => debug!("[DEBUG]   ✓ {} = 0x{:x}", key, offset),
                 None => {
                     // Don't warn if both state and __state are missing (one should exist)
-                    if !(field_name == "state" && self.struct_offsets.contains_key("task_struct::__state")) &&
-                       !(field_name == "__state" && self.struct_offsets.contains_key("task_struct::state")) {
+                    if !(field_name == "state"
+                        && self.struct_offsets.contains_key("task_struct::__state"))
+                        && !(field_name == "__state"
+                            && self.struct_offsets.contains_key("task_struct::state"))
+                    {
                         warn!("[WARNING]   ✗ {} NOT FOUND in dwarf2json!", key);
                     }
                 }
             }
         }
-        
+
         // Store the path for potential future use
         self.dwarf2json_path = Some(file_path.to_string());
-        
+
         Ok(())
     }
-    
+
     /// Load structure offsets from dwarf2json (deprecated - now handled in load_dwarf2json)
     #[allow(dead_code)]
     pub fn load_dwarf2json_offsets(&mut self, _file_path: &str) -> Result<(), AnalysisError> {
@@ -524,7 +598,10 @@ impl SymbolResolver {
 
     /// Find symbol by pattern using regex
     #[allow(dead_code)]
-    pub fn find_symbol_by_pattern(&self, pattern: &str) -> Result<Vec<(String, u64)>, AnalysisError> {
+    pub fn find_symbol_by_pattern(
+        &self,
+        pattern: &str,
+    ) -> Result<Vec<(String, u64)>, AnalysisError> {
         use regex::Regex;
 
         let re = Regex::new(pattern)?;
@@ -544,7 +621,12 @@ impl SymbolResolver {
     /// 1. Check dwarf2json structure offsets (most accurate)
     /// 2. Check structure offset database (based on kernel version)
     /// 3. Fallback to hardcoded offsets
-    pub fn get_struct_field_offset(&self, struct_name: &str, field_name: &str, kernel_version: Option<&crate::core::offsets::KernelVersion>) -> Option<u64> {
+    pub fn get_struct_field_offset(
+        &self,
+        struct_name: &str,
+        field_name: &str,
+        kernel_version: Option<&crate::core::offsets::KernelVersion>,
+    ) -> Option<u64> {
         // 1. First, try to get from dwarf2json structure offsets (most accurate)
         let key = format!("{}::{}", struct_name, field_name);
         if let Some(offset) = self.struct_offsets.get(&key) {
@@ -559,7 +641,7 @@ impl SymbolResolver {
                 return Some(*offset as u64);
             }
         }
-        
+
         // 2. Try structure offset database if we have kernel version
         if let Some(version) = kernel_version {
             let db = crate::core::offsets::StructureOffsets::for_kernel(version);
@@ -584,13 +666,25 @@ impl SymbolResolver {
     }
 
     /// Convenience method with no kernel version (uses only fallbacks)
-    pub fn get_struct_field_offset_fallback(&self, struct_name: &str, field_name: &str) -> Option<u64> {
+    pub fn get_struct_field_offset_fallback(
+        &self,
+        struct_name: &str,
+        field_name: &str,
+    ) -> Option<u64> {
         self.get_struct_field_offset(struct_name, field_name, None)
     }
 
     /// Validate if a memory offset could be a valid task_struct with specific offsets
-    fn validate_task_struct_with_offsets(&self, mapped: &[u8], offset: usize, pid_offset: usize, comm_offset: usize) -> bool {
-        let state_offset = self.get_struct_field_offset_fallback("task_struct", "state").unwrap_or(0x0) as usize;
+    fn validate_task_struct_with_offsets(
+        &self,
+        mapped: &[u8],
+        offset: usize,
+        pid_offset: usize,
+        comm_offset: usize,
+    ) -> bool {
+        let state_offset = self
+            .get_struct_field_offset_fallback("task_struct", "state")
+            .unwrap_or(0x0) as usize;
         let comm_size = 16;
 
         // Check bounds
@@ -618,12 +712,17 @@ impl SymbolResolver {
 
         // Check for obviously invalid process names (containing '=' or ')' suggests we're reading wrong data)
         // Allow ')' only at the end (for process names like "swapper/0)")
-        if comm_trimmed.contains('=') || (comm_trimmed.contains(')') && !comm_trimmed.ends_with(')')) {
+        if comm_trimmed.contains('=')
+            || (comm_trimmed.contains(')') && !comm_trimmed.ends_with(')'))
+        {
             return false;
         }
 
         // Check that most characters are printable ASCII (at least 80% for valid process names)
-        let printable_count = comm_trimmed.chars().filter(|c| c.is_ascii() && !c.is_control()).count();
+        let printable_count = comm_trimmed
+            .chars()
+            .filter(|c| c.is_ascii() && !c.is_control())
+            .count();
         if printable_count < (comm_trimmed.len() * 4 / 5) {
             return false;
         }
@@ -653,15 +752,22 @@ impl SymbolResolver {
     #[allow(dead_code)]
     fn validate_task_struct(&self, mapped: &[u8], offset: usize) -> bool {
         // Get offsets for validation
-        let pid_offset = self.get_struct_field_offset_fallback("task_struct", "pid").unwrap_or(0x328) as usize;
-        let comm_offset = self.get_struct_field_offset_fallback("task_struct", "comm").unwrap_or(0x4a8) as usize;
-        
+        let pid_offset = self
+            .get_struct_field_offset_fallback("task_struct", "pid")
+            .unwrap_or(0x328) as usize;
+        let comm_offset = self
+            .get_struct_field_offset_fallback("task_struct", "comm")
+            .unwrap_or(0x4a8) as usize;
+
         // Use the new validation function with specific offsets
         self.validate_task_struct_with_offsets(mapped, offset, pid_offset, comm_offset)
     }
 
     /// Detect kernel version from the linux_banner string
-    pub fn detect_kernel_version(&self, mapped: &[u8]) -> Option<crate::core::offsets::KernelVersion> {
+    pub fn detect_kernel_version(
+        &self,
+        mapped: &[u8],
+    ) -> Option<crate::core::offsets::KernelVersion> {
         // Search for "Linux version " string in memory
         let linux_version_pattern = b"Linux version ";
         let finder = memchr::memmem::Finder::new(linux_version_pattern);
@@ -669,7 +775,10 @@ impl SymbolResolver {
         if let Some(match_pos) = finder.find(mapped) {
             // Extract from match_pos to newline or reasonable end
             let slice = &mapped[match_pos..];
-            let end_pos = slice.iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(slice.len());
+            let end_pos = slice
+                .iter()
+                .position(|&c| c == b'\n' || c == b'\r')
+                .unwrap_or(slice.len());
             let banner_str = String::from_utf8_lossy(&slice[..end_pos]);
 
             // Parse kernel version from banner like "Linux version 5.15.0-91-generic"
@@ -684,14 +793,18 @@ impl SymbolResolver {
     /// Find the init_task address in memory
     /// This is the starting point for walking the process list
     /// If translator is provided, checks if symbol address can be translated to file offset
-    #[allow(dead_code)]  // Legacy method, prefer detect_kaslr_offset
-    pub fn find_init_task(&self, mapped: &[u8], translator: Option<&crate::translation::MemoryTranslator>) -> Option<u64> {
+    #[allow(dead_code)] // Legacy method, prefer detect_kaslr_offset
+    pub fn find_init_task(
+        &self,
+        mapped: &[u8],
+        translator: Option<&crate::translation::MemoryTranslator>,
+    ) -> Option<u64> {
         println!("Searching for init_task in memory...");
 
         // Strategy 1: Look for init_task symbol if we have it
         if let Some(addr) = self.get_symbol_address("init_task") {
             println!("Found init_task symbol at address: 0x{:x}", addr);
-            
+
             // Check if we can translate this address to a file offset
             if let Some(translator) = translator {
                 if let Some(file_offset) = translator.virtual_to_file_offset(addr) {
@@ -725,7 +838,10 @@ impl SymbolResolver {
         let dwarf_comm_offset = self.struct_offsets.get("task_struct::comm").copied();
 
         if let (Some(pid_off), Some(comm_off)) = (dwarf_pid_offset, dwarf_comm_offset) {
-            println!("Using dwarf2json offsets: pid=0x{:x}, comm=0x{:x}", pid_off, comm_off);
+            println!(
+                "Using dwarf2json offsets: pid=0x{:x}, comm=0x{:x}",
+                pid_off, comm_off
+            );
             offset_combinations.push((pid_off, comm_off));
         }
 
@@ -768,18 +884,33 @@ impl SymbolResolver {
                 let potential_task_offset = match_pos - comm_offset;
 
                 // Validate this looks like a task_struct with these offsets
-                if self.validate_task_struct_with_offsets(mapped, potential_task_offset, *pid_offset, *comm_offset) {
+                if self.validate_task_struct_with_offsets(
+                    mapped,
+                    potential_task_offset,
+                    *pid_offset,
+                    *comm_offset,
+                ) {
                     // Check if PID is 0 or 1
                     if let Some(pid) = read_i32_helper(mapped, potential_task_offset + pid_offset) {
                         if pid == 0 || pid == 1 {
-                            println!("Found potential init_task at offset 0x{:x} (PID: {})", potential_task_offset, pid);
+                            println!(
+                                "Found potential init_task at offset 0x{:x} (PID: {})",
+                                potential_task_offset, pid
+                            );
 
                             // Additional validation: read comm to confirm
-                            if let Some(comm) = read_string_helper(mapped, potential_task_offset + comm_offset, comm_size) {
+                            if let Some(comm) = read_string_helper(
+                                mapped,
+                                potential_task_offset + comm_offset,
+                                comm_size,
+                            ) {
                                 println!("  Process name: {}", comm.trim_end_matches('\0'));
                                 // Update offsets for this kernel version if we detected it
                                 if kernel_version.is_none() {
-                                    println!("  Using offsets: pid=0x{:x}, comm=0x{:x}", pid_offset, comm_offset);
+                                    println!(
+                                        "  Using offsets: pid=0x{:x}, comm=0x{:x}",
+                                        pid_offset, comm_offset
+                                    );
                                 }
                                 return Some(potential_task_offset as u64);
                             }
@@ -804,14 +935,26 @@ impl SymbolResolver {
                 let potential_task_offset = match_pos - comm_offset;
 
                 // Validate this looks like a task_struct with these offsets
-                if self.validate_task_struct_with_offsets(mapped, potential_task_offset, *pid_offset, *comm_offset) {
+                if self.validate_task_struct_with_offsets(
+                    mapped,
+                    potential_task_offset,
+                    *pid_offset,
+                    *comm_offset,
+                ) {
                     // Check if PID is 1
                     if let Some(pid) = read_i32_helper(mapped, potential_task_offset + pid_offset) {
                         if pid == 1 {
-                            println!("Found potential init_task at offset 0x{:x} (PID: {})", potential_task_offset, pid);
+                            println!(
+                                "Found potential init_task at offset 0x{:x} (PID: {})",
+                                potential_task_offset, pid
+                            );
 
                             // Additional validation: read comm to confirm
-                            if let Some(comm) = read_string_helper(mapped, potential_task_offset + comm_offset, comm_size) {
+                            if let Some(comm) = read_string_helper(
+                                mapped,
+                                potential_task_offset + comm_offset,
+                                comm_size,
+                            ) {
                                 println!("  Process name: {}", comm.trim_end_matches('\0'));
                                 return Some(potential_task_offset as u64);
                             }
@@ -844,18 +987,19 @@ impl SymbolResolver {
         use crate::kernel;
 
         // Read tasks.next pointer from init_task
-        let tasks_next_vaddr = match kernel::KernelParser::read_u64(
-            memory,
-            init_task_file_offset + tasks_offset
-        ) {
-            Some(addr) => addr,
-            None => {
-                debug!("[DEBUG] Could not read tasks.next from init_task");
-                return None;
-            }
-        };
+        let tasks_next_vaddr =
+            match kernel::KernelParser::read_u64(memory, init_task_file_offset + tasks_offset) {
+                Some(addr) => addr,
+                None => {
+                    debug!("[DEBUG] Could not read tasks.next from init_task");
+                    return None;
+                }
+            };
 
-        debug!("[DEBUG] Deriving PAGE_OFFSET from tasks.next=0x{:x}", tasks_next_vaddr);
+        debug!(
+            "[DEBUG] Deriving PAGE_OFFSET from tasks.next=0x{:x}",
+            tasks_next_vaddr
+        );
 
         // Ensure it's in the direct mapping range
         if tasks_next_vaddr < 0xffff800000000000 || tasks_next_vaddr >= 0xffffc00000000000 {
@@ -865,7 +1009,8 @@ impl SymbolResolver {
 
         // Try each memory region to see if tasks.next could point into it
         // Process smaller regions first as they're more likely to contain process structures
-        let mut regions_with_sizes: Vec<_> = translator.get_regions()
+        let mut regions_with_sizes: Vec<_> = translator
+            .get_regions()
             .iter()
             .enumerate()
             .map(|(i, r)| (i, r, r.end - r.start))
@@ -880,9 +1025,9 @@ impl SymbolResolver {
 
             // Use larger step size for very large regions to avoid excessive iterations
             let step_size = if region_size > 512 * 1024 * 1024 {
-                0x10000  // 64KB steps for regions >512MB
+                0x10000 // 64KB steps for regions >512MB
             } else {
-                0x1000   // 4KB steps for smaller regions
+                0x1000 // 4KB steps for smaller regions
             };
 
             // Limit iterations per region to prevent hanging
@@ -892,7 +1037,10 @@ impl SymbolResolver {
             for offset in (0..region_size).step_by(step_size as usize) {
                 iterations += 1;
                 if iterations > max_iterations {
-                    debug!("[DEBUG] Region {} exceeded max iterations, moving to next region", i);
+                    debug!(
+                        "[DEBUG] Region {} exceeded max iterations, moving to next region",
+                        i
+                    );
                     break;
                 }
                 let candidate_phys = region.start + offset;
@@ -901,8 +1049,9 @@ impl SymbolResolver {
                 let candidate_page_offset = tasks_next_vaddr.wrapping_sub(candidate_phys);
 
                 // Validate PAGE_OFFSET is in reasonable range
-                if candidate_page_offset < 0xffff800000000000 ||
-                   candidate_page_offset >= 0xffffb00000000000 {
+                if candidate_page_offset < 0xffff800000000000
+                    || candidate_page_offset >= 0xffffb00000000000
+                {
                     continue;
                 }
 
@@ -917,10 +1066,20 @@ impl SymbolResolver {
 
                 // Validate this looks like a task_struct
                 // Use hardcoded offsets for now (should potentially use offsets from self)
-                if let Some(pid) = kernel::KernelParser::read_i32(memory, (task_base + 0xad0).try_into().unwrap()) {
+                if let Some(pid) =
+                    kernel::KernelParser::read_i32(memory, (task_base + 0xad0).try_into().unwrap())
+                {
                     if pid > 0 && pid < 1000000 {
-                        if let Some(comm) = kernel::KernelParser::read_string(memory, (task_base + 0xcf0).try_into().unwrap(), 16) {
-                            if comm.len() >= 2 && comm.chars().all(|c| c.is_ascii_graphic() || c.is_whitespace()) {
+                        if let Some(comm) = kernel::KernelParser::read_string(
+                            memory,
+                            (task_base + 0xcf0).try_into().unwrap(),
+                            16,
+                        ) {
+                            if comm.len() >= 2
+                                && comm
+                                    .chars()
+                                    .all(|c| c.is_ascii_graphic() || c.is_whitespace())
+                            {
                                 debug!("[DEBUG] ✓ Derived PAGE_OFFSET: 0x{:x} (found PID={}, comm='{}')",
                                           candidate_page_offset, pid, comm);
                                 return Some(candidate_page_offset);

@@ -4,14 +4,14 @@ use serde::Serialize;
 /// Structure to hold process information.
 #[derive(Debug, Serialize, Clone)]
 pub struct ProcessInfo {
-    pub offset: u64,  // File offset where the task_struct is found
+    pub offset: u64, // File offset where the task_struct is found
     pub pid: i32,
     pub comm: String,
-    pub ppid: i32,     // Parent process ID
+    pub ppid: i32,       // Parent process ID
     pub start_time: u64, // Process start time
-    pub uid: u32,      // User ID
-    pub gid: u32,      // Group ID
-    pub state: String, // Process state
+    pub uid: u32,        // User ID
+    pub gid: u32,        // Group ID
+    pub state: String,   // Process state
     pub cmdline: String, // Command line arguments
 }
 
@@ -127,10 +127,12 @@ impl KernelParser {
             .ok_or_else(|| crate::error::AnalysisError::AddressTranslationFailed(virtual_addr))?;
 
         // Read the 8-byte pointer value at that file offset
-        let pointer_value = Self::read_u64(mapped, file_offset as usize)
-            .ok_or_else(|| crate::error::AnalysisError::InvalidStructure(
-                format!("Cannot read pointer at offset 0x{:x}", file_offset)
-            ))?;
+        let pointer_value = Self::read_u64(mapped, file_offset as usize).ok_or_else(|| {
+            crate::error::AnalysisError::InvalidStructure(format!(
+                "Cannot read pointer at offset 0x{:x}",
+                file_offset
+            ))
+        })?;
 
         Ok(pointer_value)
     }
@@ -168,12 +170,15 @@ pub fn validate_process_info(proc: &ProcessInfo) -> bool {
     let debug = std::env::var("LINMEMPARSER_DEBUG").is_ok();
 
     if debug {
-        eprintln!("[DEBUG] Validating PID {}: comm='{}', uid={}, gid={}",
-                  proc.pid, proc.comm, proc.uid, proc.gid);
+        eprintln!(
+            "[DEBUG] Validating PID {}: comm='{}', uid={}, gid={}",
+            proc.pid, proc.comm, proc.uid, proc.gid
+        );
     }
 
     // Check that PID is reasonable (>= 0 and within Linux limits)
-    if proc.pid < 0 || proc.pid > 4194304 {  // Linux max PID
+    if proc.pid < 0 || proc.pid > 4194304 {
+        // Linux max PID
         if debug {
             eprintln!("[DEBUG] Validation failed: PID {} out of range", proc.pid);
         }
@@ -199,7 +204,11 @@ pub fn validate_process_info(proc: &ProcessInfo) -> bool {
     }
 
     // Check that comm field contains mostly printable ASCII characters
-    let printable_count = proc.comm.chars().filter(|c| c.is_ascii() && !c.is_control()).count();
+    let printable_count = proc
+        .comm
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_control())
+        .count();
 
     // For kernel threads (typically PID < 300), be more lenient with comm validation
     // They may have unusual names or the offset might be slightly off
@@ -208,8 +217,13 @@ pub fn validate_process_info(proc: &ProcessInfo) -> bool {
 
     if printable_count < required_printable {
         if debug {
-            eprintln!("[DEBUG] Validation failed: comm '{}' has only {}/{} printable chars (need {})",
-                      proc.comm, printable_count, proc.comm.len(), required_printable);
+            eprintln!(
+                "[DEBUG] Validation failed: comm '{}' has only {}/{} printable chars (need {})",
+                proc.comm,
+                printable_count,
+                proc.comm.len(),
+                required_printable
+            );
         }
         return false;
     }
@@ -217,8 +231,10 @@ pub fn validate_process_info(proc: &ProcessInfo) -> bool {
     // Check that UID and GID are reasonable values
     if proc.uid > 65535 || proc.gid > 65535 {
         if debug {
-            eprintln!("[DEBUG] Validation failed: uid={} or gid={} out of range",
-                      proc.uid, proc.gid);
+            eprintln!(
+                "[DEBUG] Validation failed: uid={} or gid={} out of range",
+                proc.uid, proc.gid
+            );
         }
         return false;
     }

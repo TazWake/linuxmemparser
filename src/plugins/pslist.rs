@@ -1,7 +1,7 @@
 //! PsList plugin - lists running processes
-use crate::plugins::plugin_trait::{ForensicPlugin, AnalysisContext, PluginOutput};
-use crate::kernel::process_extractor::ProcessExtractor;
 use crate::error::AnalysisError;
+use crate::kernel::process_extractor::ProcessExtractor;
+use crate::plugins::plugin_trait::{AnalysisContext, ForensicPlugin, PluginOutput};
 
 pub struct PsListPlugin;
 
@@ -26,7 +26,7 @@ impl ForensicPlugin for PsListPlugin {
             context.memory_map,
             context.translator,
             context.symbol_resolver,
-            init_task_offset
+            init_task_offset,
         )?;
 
         Ok(PluginOutput::Processes(processes))

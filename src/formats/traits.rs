@@ -1,6 +1,6 @@
 //! Output format traits for the Linux Memory Parser tool
-use crate::kernel::{ProcessInfo, ConnectionInfo, ModuleInfo};
 use crate::error::AnalysisError;
+use crate::kernel::{ConnectionInfo, ModuleInfo, ProcessInfo};
 
 /// Trait for output formatters
 pub trait OutputFormatter: Send + Sync {
@@ -50,48 +50,48 @@ impl OutputWriter {
     /// Write processes to the configured destination
     pub fn write_processes(&self, processes: &[ProcessInfo]) -> Result<(), AnalysisError> {
         let content = self.formatter.format_processes(processes)?;
-        
+
         match &self.destination {
             OutputDestination::Stdout => {
                 println!("{}", content);
-            },
+            }
             OutputDestination::File(path) => {
                 std::fs::write(path, content)?;
             }
         }
-        
+
         Ok(())
     }
 
     /// Write connections to the configured destination
     pub fn write_connections(&self, connections: &[ConnectionInfo]) -> Result<(), AnalysisError> {
         let content = self.formatter.format_connections(connections)?;
-        
+
         match &self.destination {
             OutputDestination::Stdout => {
                 println!("{}", content);
-            },
+            }
             OutputDestination::File(path) => {
                 std::fs::write(path, content)?;
             }
         }
-        
+
         Ok(())
     }
 
     /// Write modules to the configured destination
     pub fn write_modules(&self, modules: &[ModuleInfo]) -> Result<(), AnalysisError> {
         let content = self.formatter.format_modules(modules)?;
-        
+
         match &self.destination {
             OutputDestination::Stdout => {
                 println!("{}", content);
-            },
+            }
             OutputDestination::File(path) => {
                 std::fs::write(path, content)?;
             }
         }
-        
+
         Ok(())
     }
 }

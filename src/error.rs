@@ -33,7 +33,9 @@ impl fmt::Display for AnalysisError {
             AnalysisError::SymbolError(msg) => write!(f, "Symbol error: {}", msg),
             AnalysisError::SymbolNotFound(msg) => write!(f, "Symbol not found: {}", msg),
             AnalysisError::TranslationError(msg) => write!(f, "Translation error: {}", msg),
-            AnalysisError::AddressTranslationFailed(addr) => write!(f, "Address translation failed: 0x{:x}", addr),
+            AnalysisError::AddressTranslationFailed(addr) => {
+                write!(f, "Address translation failed: 0x{:x}", addr)
+            }
             AnalysisError::InvalidStructure(msg) => write!(f, "Invalid structure: {}", msg),
             AnalysisError::PluginError(msg) => write!(f, "Plugin error: {}", msg),
             AnalysisError::SerdeJsonError(e) => write!(f, "JSON error: {}", e),

@@ -1,8 +1,8 @@
 //! Text (table) output formatter for the Linux Memory Parser tool
-use crate::formats::traits::OutputFormatter;
-use crate::kernel::{ProcessInfo, ConnectionInfo, ModuleInfo, format_start_time};
 use crate::error::AnalysisError;
-use prettytable::{Table, Row, Cell};
+use crate::formats::traits::OutputFormatter;
+use crate::kernel::{format_start_time, ConnectionInfo, ModuleInfo, ProcessInfo};
+use prettytable::{Cell, Row, Table};
 
 /// Text formatter that outputs data in a human-readable table format
 pub struct TextFormatter;
@@ -15,7 +15,7 @@ impl OutputFormatter for TextFormatter {
         // Header
         table.add_row(Row::new(vec![
             Cell::new("PID").style_spec("c"),
-            Cell::new("PPID").style_spec("c"), 
+            Cell::new("PPID").style_spec("c"),
             Cell::new("COMM").style_spec("c"),
             Cell::new("STATE").style_spec("c"),
             Cell::new("START_TIME").style_spec("c"),

@@ -1,18 +1,18 @@
 //! Plugin manager for the Linux Memory Parser tool
 use std::collections::HashMap;
 
+pub mod files;
+pub mod modules;
+pub mod netstat;
 pub mod plugin_trait;
 pub mod pslist;
 pub mod pstree;
-pub mod netstat;
-pub mod modules;
-pub mod files;
 
+pub use files::FilesPlugin;
+pub use modules::ModulesPlugin;
+pub use netstat::NetStatPlugin;
 pub use pslist::PsListPlugin;
 pub use pstree::PsTreePlugin;
-pub use netstat::NetStatPlugin;
-pub use modules::ModulesPlugin;
-pub use files::FilesPlugin;
 
 // For now, use a simplified plugin manager that doesn't depend on the complex plugin modules
 #[allow(dead_code)]
