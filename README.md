@@ -6,7 +6,7 @@
 
 ## Project Summary
 
-**linuxmemparser** is a high-performance forensic analysis tool written in Rust for parsing and analyzing Linux LIME (Linux Memory Extractor) memory dumps. Designed for digital forensics investigators, incident responders, and security researchers, it extracts forensically relevant artifacts from memory captures with a focus on performance, reliability, and ease of use.
+**linuxmemparser** is a forensic analysis tool written in Rust for parsing and analyzing Linux LIME (Linux Memory Extractor) memory dumps. Designed for digital forensics investigators, incident responders, and security researchers, it extracts forensically relevant artifacts from memory captures with a focus on performance, reliability, and ease of use.
 
 ### Key Features
 
@@ -54,10 +54,3 @@
 - `criterion` - Benchmarking framework
 - `assert_cmd` / `predicates` - Integration testing utilities
 - `tempfile` - Temporary file handling for tests
-
-**CI/CD Pipeline:**
-
-- GitHub Actions for continuous integration
-- Automated testing, linting, and coverage reporting
-- Automated releases on version tags
-- Multi-format artifact generation with checksums
