@@ -1,6 +1,24 @@
 //! Memory translation module for converting between virtual, physical, and file offsets
 use crate::memory::MemoryRegion;
 
+// Macro for conditional debug output
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        if std::env::var("LINMEMPARSER_DEBUG").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
+// Macro for conditional warning output
+macro_rules! warn {
+    ($($arg:tt)*) => {
+        if std::env::var("LINMEMPARSER_VERBOSE").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 // x86-64 kernel address space constants
 #[allow(dead_code)]
 const KERNEL_TEXT_BASE: u64 = 0xffffffff81000000; // _text (actual kernel text start)
@@ -70,13 +88,8 @@ impl MemoryTranslator {
     /// - Kernel text (.text, .data, etc.): virtual >= 0xffffffff81000000 -> physical = (virtual - 0xffffffff80000000) + phys_base
     /// - Direct mapping: virtual PAGE_OFFSET + offset -> physical 0x0 + offset
     fn virtual_to_physical(&self, virtual_addr: u64) -> Option<u64> {
-        // Check if debug logging is enabled via environment variable
-        let debug = std::env::var("LINMEMPARSER_DEBUG").is_ok();
-
-        if debug {
-            eprintln!("[DEBUG] Translating virtual address: 0x{:x}", virtual_addr);
-            eprintln!("[DEBUG] Using phys_base: 0x{:x}", self.phys_base);
-        }
+        debug!("[DEBUG] Translating virtual address: 0x{:x}", virtual_addr);
+        debug!("[DEBUG] Using phys_base: 0x{:x}", self.phys_base);
 
         // Check if it's in kernel text/data region (0xffffffff80000000 - 0xffffffffff000000)
         if virtual_addr >= KERNEL_MAP_BASE && virtual_addr < 0xffffffffff000000 {
@@ -85,9 +98,7 @@ impl MemoryTranslator {
             let offset = virtual_addr - KERNEL_MAP_BASE;
             let physical = self.phys_base + offset;
 
-            if debug {
-                eprintln!("[DEBUG] Kernel text mapping: offset=0x{:x}, physical=0x{:x}", offset, physical);
-            }
+            debug!("[DEBUG] Kernel text mapping: offset=0x{:x}, physical=0x{:x}", offset, physical);
 
             return Some(physical);
         }
@@ -96,10 +107,8 @@ impl MemoryTranslator {
         if virtual_addr >= self.page_offset_5level && virtual_addr < 0xffffc88000000000 {
             let physical = virtual_addr - self.page_offset_5level;
 
-            if debug {
-                eprintln!("[DEBUG] 5-level paging direct mapping: physical=0x{:x} (page_offset_5level=0x{:x})",
+            debug!("[DEBUG] 5-level paging direct mapping: physical=0x{:x} (page_offset_5level=0x{:x})",
                           physical, self.page_offset_5level);
-            }
 
             return Some(physical);
         }
@@ -108,18 +117,14 @@ impl MemoryTranslator {
         if virtual_addr >= self.page_offset_4level && virtual_addr < 0xffffc80000000000 {
             let physical = virtual_addr - self.page_offset_4level;
 
-            if debug {
-                eprintln!("[DEBUG] 4-level paging direct mapping: physical=0x{:x} (page_offset_4level=0x{:x})",
+            debug!("[DEBUG] 4-level paging direct mapping: physical=0x{:x} (page_offset_4level=0x{:x})",
                           physical, self.page_offset_4level);
-            }
 
             return Some(physical);
         }
 
         // Address doesn't match known kernel mappings
-        if debug {
-            eprintln!("[DEBUG] Address not in known kernel mappings");
-        }
+        debug!("[DEBUG] Address not in known kernel mappings");
 
         None
     }

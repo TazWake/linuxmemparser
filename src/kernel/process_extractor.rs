@@ -6,6 +6,24 @@ use crate::memory::MemoryMap;
 use crate::translation::MemoryTranslator;
 use crate::error::AnalysisError;
 
+// Macro for conditional debug output
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        if std::env::var("LINMEMPARSER_DEBUG").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
+// Macro for conditional warning output
+macro_rules! warn {
+    ($($arg:tt)*) => {
+        if std::env::var("LINMEMPARSER_VERBOSE").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 /// Process extractor for parsing task_struct and extracting process information
 pub struct ProcessExtractor;
 
@@ -32,7 +50,7 @@ impl ProcessExtractor {
         // Get offsets from symbol resolver using the kernel version for better accuracy
         let pid_offset = symbol_resolver.get_struct_field_offset("task_struct", "pid", kernel_version.as_ref())
             .unwrap_or(0x328) as usize;  // Use more standard offset as fallback
-        eprintln!("[DEBUG] extract_process_info: using pid_offset=0x{:x}, reading from file_offset=0x{:x}",
+        debug!("[DEBUG] extract_process_info: using pid_offset=0x{:x}, reading from file_offset=0x{:x}",
                   pid_offset, (task_struct_offset as usize) + pid_offset);
         let comm_offset = symbol_resolver.get_struct_field_offset("task_struct", "comm", kernel_version.as_ref())
             .unwrap_or(0x4a8) as usize;  // Use more standard offset as fallback
@@ -120,20 +138,30 @@ impl ProcessExtractor {
         let mm_ptr = KernelParser::read_u64(mapped, (task_struct_offset as usize) + mm_offset)
             .unwrap_or(0);
 
+        debug!("[DEBUG] PID {}: mm_offset=0x{:x}, mm_ptr=0x{:x}", pid, mm_offset, mm_ptr);
+
         let cmdline = if mm_ptr != 0 {
             // Translate mm_struct pointer to file offset
             if let Some(mm_file_offset) = translator.virtual_to_file_offset(mm_ptr) {
+                debug!("[DEBUG] PID {}: mm_file_offset=0x{:x}", pid, mm_file_offset);
+
                 // Get arg_start and arg_end offsets in mm_struct
                 let arg_start_offset = symbol_resolver.get_struct_field_offset("mm_struct", "arg_start", kernel_version.as_ref())
                     .unwrap_or(0x108) as usize;
                 let arg_end_offset = symbol_resolver.get_struct_field_offset("mm_struct", "arg_end", kernel_version.as_ref())
                     .unwrap_or(0x110) as usize;
 
+                debug!("[DEBUG] PID {}: arg_start_offset=0x{:x}, arg_end_offset=0x{:x}",
+                       pid, arg_start_offset, arg_end_offset);
+
                 // Read arg_start and arg_end pointers
                 let arg_start = KernelParser::read_u64(mapped, mm_file_offset as usize + arg_start_offset)
                     .unwrap_or(0);
                 let arg_end = KernelParser::read_u64(mapped, mm_file_offset as usize + arg_end_offset)
                     .unwrap_or(0);
+
+                debug!("[DEBUG] PID {}: arg_start=0x{:x}, arg_end=0x{:x}, len={}",
+                       pid, arg_start, arg_end, arg_end.saturating_sub(arg_start));
 
                 if arg_start != 0 && arg_end > arg_start {
                     let arg_len = (arg_end - arg_start) as usize;
@@ -142,6 +170,8 @@ impl ProcessExtractor {
                         // Try to translate arg_start to file offset
                         // This works if the arguments are in captured memory
                         if let Some(args_file_offset) = translator.virtual_to_file_offset(arg_start) {
+                            debug!("[DEBUG] PID {}: args_file_offset=0x{:x}, reading {} bytes",
+                                   pid, args_file_offset, arg_len);
                             // Read the argument buffer
                             let mut cmdline_bytes = Vec::new();
                             for i in 0..arg_len {
@@ -164,18 +194,23 @@ impl ProcessExtractor {
                                 .filter(|s| !s.is_empty())
                                 .unwrap_or_else(|| "[cmdline not available]".to_string())
                         } else {
+                            debug!("[DEBUG] PID {}: Failed to translate arg_start to file offset", pid);
                             "[cmdline not in memory]".to_string()
                         }
                     } else {
+                        debug!("[DEBUG] PID {}: Invalid cmdline length: {}", pid, arg_len);
                         "[invalid cmdline length]".to_string()
                     }
                 } else {
+                    debug!("[DEBUG] PID {}: arg_start=0 or arg_end<=arg_start", pid);
                     "[no cmdline]".to_string()
                 }
             } else {
+                debug!("[DEBUG] PID {}: Failed to translate mm_ptr to file offset", pid);
                 "[mm_struct not in memory]".to_string()
             }
         } else {
+            debug!("[DEBUG] PID {}: mm_ptr is NULL (kernel thread)", pid);
             "[kernel thread]".to_string()
         };
 
@@ -215,34 +250,36 @@ impl ProcessExtractor {
             .unwrap_or(0x0) as usize;  // List head offset within task_struct
 
         // Debug output to show what offset is being used
-        eprintln!("[DEBUG] Using tasks_offset: 0x{:x} ({} bytes)", tasks_offset, tasks_offset);
+        debug!("[DEBUG] Using tasks_offset: 0x{:x} ({} bytes)", tasks_offset, tasks_offset);
         if tasks_offset == 0 {
-            eprintln!("[WARNING] tasks_offset is 0! This is likely incorrect and will cause process walking to fail.");
-            eprintln!("[WARNING] The dwarf2json file may not contain the 'tasks' field offset.");
+            warn!("[WARNING] tasks_offset is 0! This is likely incorrect and will cause process walking to fail.");
+            warn!("[WARNING] The dwarf2json file may not contain the 'tasks' field offset.");
         }
 
         // Debug: Dump first 64 bytes of init_task to verify it looks reasonable
-        eprintln!("[DEBUG] First 64 bytes of init_task at offset 0x{:x}:", init_task_offset);
+        debug!("[DEBUG] First 64 bytes of init_task at offset 0x{:x}:", init_task_offset);
         if (init_task_offset as usize) + 64 <= mapped.len() {
-            for chunk in 0..4 {
-                let offset = init_task_offset as usize + (chunk * 16);
-                eprint!("[DEBUG]   0x{:04x}: ", chunk * 16);
-                for i in 0..16 {
-                    eprint!("{:02x} ", mapped[offset + i]);
+            if std::env::var("LINMEMPARSER_DEBUG").is_ok() {
+                for chunk in 0..4 {
+                    let offset = init_task_offset as usize + (chunk * 16);
+                    eprint!("[DEBUG]   0x{:04x}: ", chunk * 16);
+                    for i in 0..16 {
+                        eprint!("{:02x} ", mapped[offset + i]);
+                    }
+                    eprintln!();
                 }
-                eprintln!();
             }
         }
 
         loop {
             // Safety checks
             if iterations >= max_iterations {
-                eprintln!("Warning: Maximum iterations reached while walking process list");
+                warn!("[WARNING] Maximum iterations reached while walking process list");
                 break;
             }
 
             if current_offset >= mapped.len() {
-                eprintln!("Warning: Current offset exceeds memory map size");
+                warn!("[WARNING] Current offset exceeds memory map size");
                 break;
             }
 
@@ -261,11 +298,11 @@ impl ProcessExtractor {
                     if crate::kernel::validate_process_info(&process_info) {
                         processes.push(process_info);
                     } else {
-                        eprintln!("Warning: Process validation failed for PID {}, skipping", process_info.pid);
+                        warn!("[WARNING] Process validation failed for PID {}, skipping", process_info.pid);
                     }
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to extract process info at offset 0x{:x}: {}", current_offset, e);
+                    warn!("[WARNING] Failed to extract process info at offset 0x{:x}: {}", current_offset, e);
                     // Continue with the next process rather than breaking
                 }
             }
@@ -276,12 +313,12 @@ impl ProcessExtractor {
             // So the next pointer is at the same offset as the tasks field
             let next_ptr = match KernelParser::read_u64(mapped, current_offset + tasks_offset) {
                 Some(n) => {
-                    eprintln!("[DEBUG] Read next_ptr: 0x{:x} from file_offset 0x{:x} (current=0x{:x} + tasks_offset=0x{:x})",
+                    debug!("[DEBUG] Read next_ptr: 0x{:x} from file_offset 0x{:x} (current=0x{:x} + tasks_offset=0x{:x})",
                               n, current_offset + tasks_offset, current_offset, tasks_offset);
                     n
                 }
                 None => {
-                    eprintln!("Warning: Failed to read next pointer at offset 0x{:x}", current_offset + tasks_offset);
+                    warn!("[WARNING] Failed to read next pointer at offset 0x{:x}", current_offset + tasks_offset);
                     break;
                 }
             };
@@ -289,19 +326,21 @@ impl ProcessExtractor {
             // Validate the next pointer
             if next_ptr == 0 {
                 // Null pointer indicates end of list (this shouldn't happen in a circular list!)
-                eprintln!("[WARNING] Found NULL next pointer at file_offset 0x{:x} - this shouldn't happen in a circular list!", current_offset + tasks_offset);
-                eprintln!("[WARNING] This likely means:");
-                eprintln!("[WARNING]   1. The tasks_offset (0x{:x}) is incorrect", tasks_offset);
-                eprintln!("[WARNING]   2. The memory region is corrupted");
-                eprintln!("[WARNING]   3. The init_task location is wrong");
+                warn!("[WARNING] Found NULL next pointer at file_offset 0x{:x} - this shouldn't happen in a circular list!", current_offset + tasks_offset);
+                warn!("[WARNING] This likely means:");
+                warn!("[WARNING]   1. The tasks_offset (0x{:x}) is incorrect", tasks_offset);
+                warn!("[WARNING]   2. The memory region is corrupted");
+                warn!("[WARNING]   3. The init_task location is wrong");
 
                 // Try reading a few more bytes to see what's there
                 if current_offset + tasks_offset + 32 <= mapped.len() {
-                    eprint!("[DEBUG] Memory dump at offset 0x{:x}: ", current_offset + tasks_offset);
-                    for i in 0..32 {
-                        eprint!("{:02x} ", mapped[current_offset + tasks_offset + i]);
+                    if std::env::var("LINMEMPARSER_DEBUG").is_ok() {
+                        eprint!("[DEBUG] Memory dump at offset 0x{:x}: ", current_offset + tasks_offset);
+                        for i in 0..32 {
+                            eprint!("{:02x} ", mapped[current_offset + tasks_offset + i]);
+                        }
+                        eprintln!();
                     }
-                    eprintln!();
                 }
                 break;
             }
@@ -310,7 +349,7 @@ impl ProcessExtractor {
             let next_list_head_offset = match translator.virtual_to_file_offset(next_ptr) {
                 Some(file_offset) => file_offset as usize,
                 None => {
-                    eprintln!("Warning: Failed to translate virtual address 0x{:x} to file offset", next_ptr);
+                    warn!("[WARNING] Failed to translate virtual address 0x{:x} to file offset", next_ptr);
                     break;
                 }
             };
@@ -320,18 +359,18 @@ impl ProcessExtractor {
             // This is the container_of() pattern used in Linux kernel
             let next_offset = next_list_head_offset.saturating_sub(tasks_offset);
 
-            eprintln!("[DEBUG] next_list_head_offset=0x{:x}, tasks_offset=0x{:x}, next_task_struct_offset=0x{:x}",
+            debug!("[DEBUG] next_list_head_offset=0x{:x}, tasks_offset=0x{:x}, next_task_struct_offset=0x{:x}",
                      next_list_head_offset, tasks_offset, next_offset);
 
             // Check if we've reached the init_task again (circular list)
             if next_offset == init_task_offset as usize {
-                eprintln!("[DEBUG] Completed circular list - back at init_task");
+                debug!("[DEBUG] Completed circular list - back at init_task");
                 break;
             }
 
             // Additional safety check for reasonable pointer values
             if next_offset >= mapped.len() {
-                eprintln!("Warning: Next task_struct offset 0x{:x} beyond memory map", next_offset);
+                warn!("[WARNING] Next task_struct offset 0x{:x} beyond memory map", next_offset);
                 break;
             }
 

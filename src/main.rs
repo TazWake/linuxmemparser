@@ -61,8 +61,7 @@ fn main() -> Result<(), AnalysisError> {
         return Ok(());
     }
 
-    let open_msg = format!("Opening memory capture file: {}", cli.memory_dump.display());
-    println!("{}", open_msg);
+    warn!("Opening memory capture file: {}", cli.memory_dump.display());
 
     // Open and memory-map the file.
     let memory_map = MemoryMap::new(&cli.memory_dump.to_string_lossy())?;
@@ -70,28 +69,22 @@ fn main() -> Result<(), AnalysisError> {
 
     // --- Parse the LIME header (if present) and create translator --- //
     let regions = if memory_map.is_lime() {
-        let header_msg = "LIME header detected. Parsing memory region information:";
-        println!("{}", header_msg);
+        warn!("LIME header detected. Parsing memory region information:");
         if let Some(regs) = memory_map.parse_lime_header() {
             for (i, region) in regs.iter().enumerate() {
-                let msg = format!(
-                    "Region {}: Start: 0x{:x}, End: 0x{:x}, FileOffset: {}",
-                    i, region.start, region.end, region.file_offset
-                );
-                println!("{}", msg);
+                warn!("Region {}: Start: 0x{:x}, End: 0x{:x}, FileOffset: {}",
+                    i, region.start, region.end, region.file_offset);
             }
 
             // For now, we'll just print the regions to show the translator works
-            println!("Memory translator will be initialized with {} regions", regs.len());
+            warn!("Memory translator will be initialized with {} regions", regs.len());
             Some(regs)
         } else {
-            let msg = "LIME header detected, but no memory regions were found.";
-            println!("{}", msg);
+            warn!("LIME header detected, but no memory regions were found.");
             None
         }
     } else {
-        let msg = "No LIME header found; assuming raw memory capture.";
-        println!("{}", msg);
+        warn!("No LIME header found; assuming raw memory capture.");
         None
     };
 
@@ -113,61 +106,60 @@ fn main() -> Result<(), AnalysisError> {
     let mut symbol_resolver = SymbolResolver::new();
     if let Some(symbol_path) = &cli.symbols {
         let path_str = symbol_path.to_string_lossy();
-        println!("Loading symbols from: {}", path_str);
+        warn!("Loading symbols from: {}", path_str);
 
         // Try to load as different formats
         if path_str.ends_with(".json") {
             // Try dwarf2json format first
             match symbol_resolver.load_dwarf2json(&path_str) {
                 Ok(_) => {
-                    println!("Successfully loaded symbols and structure offsets from dwarf2json file");
+                    warn!("Successfully loaded symbols and structure offsets from dwarf2json file");
                 },
                 Err(e) => {
-                    eprintln!("Failed to load as dwarf2json: {}", e);
-                    eprintln!("Trying as System.map format...");
+                    debug!("[DEBUG] Failed to load as dwarf2json: {}", e);
+                    debug!("[DEBUG] Trying as System.map format...");
                     // Try as System.map format
                     symbol_resolver.load_system_map(&path_str)
                         .map_err(|_| AnalysisError::SymbolError("Failed to load symbols".to_string()))?;
-                    println!("Successfully loaded symbols from System.map format");
+                    warn!("Successfully loaded symbols from System.map format");
                 }
             }
         } else if path_str.contains("kallsyms") {
             // Try kallsyms format (handles 0 addresses differently)
             symbol_resolver.load_kallsyms(&path_str)
                 .map_err(|_| AnalysisError::SymbolError("Failed to load kallsyms".to_string()))?;
-            println!("Successfully loaded symbols from kallsyms format");
+            warn!("Successfully loaded symbols from kallsyms format");
         } else {
             // Assume System.map format
             symbol_resolver.load_system_map(&path_str)
                 .map_err(|_| AnalysisError::SymbolError("Failed to load symbols".to_string()))?;
-            println!("Successfully loaded symbols from System.map format");
+            warn!("Successfully loaded symbols from System.map format");
         }
     } else {
         // Try to locate symbols via heuristic search
         if let Some(marker_offset) = SymbolResolver::detect_symbol_table(mapped) {
-            let marker_msg = format!("Kernel symbol table marker found at offset: 0x{:x}", marker_offset);
-            println!("{}", marker_msg);
-            println!("Symbol resolver initialized with {} symbols", symbol_resolver.symbol_count());
+            warn!("Kernel symbol table marker found at offset: 0x{:x}", marker_offset);
+            warn!("Symbol resolver initialized with {} symbols", symbol_resolver.symbol_count());
         } else {
-            println!("Kernel symbol table marker not detected, continuing with heuristic search...");
+            warn!("Kernel symbol table marker not detected, continuing with heuristic search...");
         }
     }
 
     // Detect kernel version if possible
     let detected_version = symbol_resolver.detect_kernel_version(mapped);
     if let Some(version) = &detected_version {
-        println!("Detected kernel version in memory dump: {}", version);
+        warn!("Detected kernel version in memory dump: {}", version);
 
         // Warn if System.map might not match
         if cli.symbols.is_some() {
-            println!("Note: Verify that System.map matches kernel version {}.{}",
+            warn!("Note: Verify that System.map matches kernel version {}.{}",
                      version.major, version.minor);
-            println!("      Mismatched versions can cause incorrect structure offsets.");
+            warn!("      Mismatched versions can cause incorrect structure offsets.");
         }
     } else {
-        println!("Warning: Could not detect kernel version from memory dump.");
+        warn!("[WARNING] Could not detect kernel version from memory dump.");
         if cli.symbols.is_some() {
-            println!("      Ensure System.map matches the kernel version in the memory dump.");
+            warn!("      Ensure System.map matches the kernel version in the memory dump.");
         }
     }
 
@@ -180,19 +172,19 @@ fn main() -> Result<(), AnalysisError> {
              This may indicate KASLR is enabled and the symbol addresses don't match the runtime kernel.".to_string()
         ))?;
 
-    println!("Found init_task at file offset: 0x{:x}", init_task_offset);
+    warn!("Found init_task at file offset: 0x{:x}", init_task_offset);
 
     // STEP 2: Now recalculate phys_base using the CORRECT init_task location
     // This is critical - we need phys_base to translate virtual addresses in the process list
     let phys_base_candidates = symbol_resolver.calculate_phys_base_candidates();
 
     if phys_base_candidates.is_empty() {
-        println!("Warning: Could not calculate phys_base candidates from _text symbol");
-        println!("Using default phys_base: 0x{:x}", translator.get_phys_base());
-        println!("This may cause incorrect address translation - ensure symbol file contains _text");
+        warn!("[WARNING] Could not calculate phys_base candidates from _text symbol");
+        warn!("Using default phys_base: 0x{:x}", translator.get_phys_base());
+        warn!("This may cause incorrect address translation - ensure symbol file contains _text");
     } else {
-        println!("\nRecalculating phys_base using found init_task location...");
-        println!("Testing {} phys_base candidate(s)...", phys_base_candidates.len());
+        warn!("Recalculating phys_base using found init_task location...");
+        warn!("Testing {} phys_base candidate(s)...", phys_base_candidates.len());
 
         let mut found_valid_phys_base = false;
 
@@ -235,7 +227,7 @@ fn main() -> Result<(), AnalysisError> {
                                      offset_diff, pid);
 
                             if pid == 0 {
-                                println!("✓ Found valid phys_base: 0x{:x} (translates correctly to found init_task with PID 0)", candidate);
+                                warn!("✓ Found valid phys_base: 0x{:x} (translates correctly to found init_task with PID 0)", candidate);
                                 found_valid_phys_base = true;
                                 break;
                             }
@@ -249,11 +241,11 @@ fn main() -> Result<(), AnalysisError> {
             }
 
             if !found_valid_phys_base {
-                println!("Warning: None of the phys_base candidates correctly translate init_task");
-                println!("This likely means:");
-                println!("  1. The memory regions in LIME header may be incomplete");
-                println!("  2. The _text symbol address may be incorrect");
-                println!("Attempting to calculate phys_base directly from found init_task...");
+                warn!("[WARNING] None of the phys_base candidates correctly translate init_task");
+                warn!("This likely means:");
+                warn!("  1. The memory regions in LIME header may be incomplete");
+                warn!("  2. The _text symbol address may be incorrect");
+                warn!("Attempting to calculate phys_base directly from found init_task...");
 
                 // Try to calculate phys_base directly from the found init_task location
                 // We know: file_offset = (vaddr - region.start) + region.file_offset
@@ -283,21 +275,21 @@ fn main() -> Result<(), AnalysisError> {
                         debug!("[DEBUG]   Calculated phys_base: 0x{:x}", calculated_phys_base);
                         translator.set_phys_base(calculated_phys_base);
 
-                        println!("✓ Calculated phys_base from memory region: 0x{:x}", calculated_phys_base);
+                        warn!("✓ Calculated phys_base from memory region: 0x{:x}", calculated_phys_base);
                         found_valid_phys_base = true;
                         break;
                     }
                 }
 
                 if !found_valid_phys_base {
-                    println!("Warning: Could not calculate phys_base from init_task location");
-                    println!("Using first candidate: 0x{:x}", phys_base_candidates[0]);
+                    warn!("[WARNING] Could not calculate phys_base from init_task location");
+                    warn!("Using first candidate: 0x{:x}", phys_base_candidates[0]);
                     translator.set_phys_base(phys_base_candidates[0]);
                 }
             }
         } else {
-            println!("Warning: init_task symbol not found, cannot validate phys_base");
-            println!("Using first candidate: 0x{:x}", phys_base_candidates[0]);
+            warn!("[WARNING] init_task symbol not found, cannot validate phys_base");
+            warn!("Using first candidate: 0x{:x}", phys_base_candidates[0]);
             translator.set_phys_base(phys_base_candidates[0]);
         }
     }
@@ -513,7 +505,7 @@ fn main() -> Result<(), AnalysisError> {
                 translator.set_page_offset_5level(best.page_offset);
             }
 
-            println!("✓ Successfully detected PAGE_OFFSET: 0x{:x}", best.page_offset);
+            warn!("✓ Successfully detected PAGE_OFFSET: 0x{:x}", best.page_offset);
         } else {
             warn!("[WARNING] Could not detect PAGE_OFFSET using candidate validation");
             debug!("[DEBUG] Attempting to derive PAGE_OFFSET from init_task...");
@@ -528,7 +520,7 @@ fn main() -> Result<(), AnalysisError> {
                 debug!("[DEBUG] ✓ Successfully derived PAGE_OFFSET: 0x{:x}", derived_offset);
                 translator.set_page_offset_5level(derived_offset);
                 translator.set_page_offset_4level(derived_offset);  // Set both to same value for KASLR
-                println!("✓ Derived PAGE_OFFSET from init_task: 0x{:x}", derived_offset);
+                warn!("✓ Derived PAGE_OFFSET from init_task: 0x{:x}", derived_offset);
             } else {
                 warn!("[WARNING] Could not derive PAGE_OFFSET - using defaults");
                 warn!("[WARNING] Direct mapping translations may be incorrect");

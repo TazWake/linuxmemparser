@@ -5,24 +5,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use crate::error::AnalysisError;
 
-// Macro for conditional debug output
-macro_rules! debug {
-    ($($arg:tt)*) => {
-        if std::env::var("LINMEMPARSER_DEBUG").is_ok() {
-            eprintln!($($arg)*);
-        }
-    };
-}
-
-// Macro for conditional warning output
-macro_rules! warn {
-    ($($arg:tt)*) => {
-        if std::env::var("LINMEMPARSER_VERBOSE").is_ok() {
-            eprintln!($($arg)*);
-        }
-    };
-}
-
 /// Symbol entry in the new format (6.x)
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -38,6 +20,7 @@ pub struct DwarfField {
     #[serde(default)]
     pub offset: usize,
     #[serde(rename = "type", default)]
+    #[allow(dead_code)]
     pub field_type: Value,  // Can be string or complex object, we don't use it
 }
 
