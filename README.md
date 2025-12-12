@@ -18,6 +18,35 @@
 - **Multi-format Symbol Support**: Works with System.map, kallsyms, and dwarf2json (Volatility 3 compatible)
 - **Plugin Architecture**: Extensible design for custom analysis modules
 
+### Command Lines and Use
+
+```bash
+Usage: linuxmemparser [OPTIONS] <MEMORY_DUMP> [COMMAND]
+
+Commands:
+  pslist   List running processes
+  pstree   Show process tree
+  netstat  Network connections
+  modules  Kernel modules
+  files    Open files (not yet implemented)
+  help     Print this message or the help of the given subcommand(s)
+
+Arguments:
+  <MEMORY_DUMP>  Path to LIME memory dump
+
+Options:
+  -a, --all              Run all plugins
+  -s, --symbols <FILE>   Path to symbol file (System.map, kallsyms, or dwarf2json)
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, csv, json, jsonl]
+  -o, --output <FILE>    Output file (default: stdout)
+  -d, --debug            Enable debug output
+  -v, --verbose          Enable verbose output (warnings, status messages)
+  -l, --list-plugins     List available plugins
+  -h, --help             Print help
+```
+
+---
+
 ### Tooling & Technology Stack
 
 **Language & Runtime:**
