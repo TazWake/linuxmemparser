@@ -2,22 +2,46 @@
 use std::collections::HashMap;
 use std::fs;
 use serde::Deserialize;
+use serde_json::Value;
 use crate::error::AnalysisError;
 
+// Macro for conditional debug output
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        if std::env::var("LINMEMPARSER_DEBUG").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
+// Macro for conditional warning output
+macro_rules! warn {
+    ($($arg:tt)*) => {
+        if std::env::var("LINMEMPARSER_VERBOSE").is_ok() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
+/// Symbol entry in the new format (6.x)
 #[derive(Debug, Deserialize)]
-struct SymbolEntry {
+#[allow(dead_code)]
+struct SymbolEntryNew {
+    #[serde(rename = "type")]
+    symbol_type: Value,  // Can be complex, we ignore it
     address: u64,
 }
 
+/// Field entry in user_types - type can be complex object or string
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct DwarfField {
     #[serde(default)]
     pub offset: usize,
     #[serde(rename = "type", default)]
-    pub field_type: String,
+    pub field_type: Value,  // Can be string or complex object, we don't use it
 }
 
+/// Structure definition
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct DwarfStruct {
@@ -25,20 +49,38 @@ pub struct DwarfStruct {
     pub size: usize,
     #[serde(default)]
     pub fields: Option<HashMap<String, DwarfField>>,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
+/// Metadata section (optional, in newer formats)
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct Metadata {
+    #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
+    producer: Option<Value>,
+}
+
+/// Main dwarf2json structure - handles both old and new formats
 #[derive(Debug, Deserialize)]
 pub struct DwarfSymbols {
     #[serde(default)]
-    symbols: HashMap<String, SymbolEntry>,
+    #[allow(dead_code)]
+    metadata: Option<Metadata>,
+    #[serde(default)]
+    symbols: HashMap<String, Value>,  // Can be old format (u64) or new format (object with address field)
+    #[serde(default)]
+    user_types: HashMap<String, DwarfStruct>,
     #[serde(default)]
     #[allow(dead_code)]
-    user_types: HashMap<String, DwarfStruct>,
+    base_types: Option<HashMap<String, Value>>,
 }
 
 impl DwarfSymbols {
     /// Load a dwarf2json file and parse it into symbols and structures
-    #[allow(dead_code)]
+    #[allow(dead_code)]  // Reserved for future symbol-based analysis
     pub fn load_from_file(path: &std::path::Path) -> Result<Self, AnalysisError> {
         let content = fs::read_to_string(path)?;
         let dwarf: DwarfSymbols = serde_json::from_str(&content)?;
@@ -46,13 +88,23 @@ impl DwarfSymbols {
     }
 
     /// Get the address of a symbol by name
-    #[allow(dead_code)]
+    /// Handles both old format (direct u64) and new format (object with "address" field)
+    #[allow(dead_code)]  // Reserved for future symbol resolution
     pub fn get_symbol_address(&self, name: &str) -> Option<u64> {
-        self.symbols.get(name).map(|entry| entry.address)
+        self.symbols.get(name).and_then(|value| {
+            // Try new format first (object with "address" field)
+            if let Some(obj) = value.as_object() {
+                if let Some(addr) = obj.get("address") {
+                    return addr.as_u64();
+                }
+            }
+            // Try old format (direct u64)
+            value.as_u64()
+        })
     }
 
     /// Get the offset of a field within a structure
-    #[allow(dead_code)]
+    #[allow(dead_code)]  // Reserved for future offset lookup
     pub fn get_field_offset(&self, struct_name: &str, field_name: &str) -> Option<usize> {
         self.user_types
             .get(struct_name)?
@@ -65,7 +117,16 @@ impl DwarfSymbols {
     /// Get all symbols as a HashMap of name -> address
     pub fn get_symbols(&self) -> HashMap<String, u64> {
         self.symbols.iter()
-            .map(|(name, entry)| (name.clone(), entry.address))
+            .filter_map(|(name, value)| {
+                // Try new format first (object with "address" field)
+                if let Some(obj) = value.as_object() {
+                    if let Some(addr) = obj.get("address") {
+                        return addr.as_u64().map(|a| (name.clone(), a));
+                    }
+                }
+                // Try old format (direct u64)
+                value.as_u64().map(|a| (name.clone(), a))
+            })
             .collect()
     }
 
@@ -96,32 +157,8 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_dwarf_symbols_creation() {
-        let mut symbols = HashMap::new();
-        symbols.insert("init_task".to_string(), 0xffffffffa1e00000);
-        let mut fields = HashMap::new();
-        fields.insert("pid".to_string(), DwarfField {
-            offset: 0x328,
-            field_type: "int".to_string(),
-        });
-        let mut user_types = HashMap::new();
-        user_types.insert("task_struct".to_string(), DwarfStruct {
-            size: 9216,
-            fields,
-        });
-
-        let dwarf = DwarfSymbols {
-            symbols,
-            user_types,
-        };
-
-        assert_eq!(dwarf.get_symbol_address("init_task"), Some(0xffffffffa1e00000));
-        assert_eq!(dwarf.get_field_offset("task_struct", "pid"), Some(0x328));
-    }
-
-    #[test]
-    fn test_load_from_file() -> Result<(), Box<dyn std::error::Error>> {
-        // Create a temporary file with sample dwarf2json content
+    fn test_dwarf_symbols_old_format() -> Result<(), Box<dyn std::error::Error>> {
+        // Create a temporary file with old dwarf2json format
         let mut temp_file = NamedTempFile::new()?;
         let sample_content = r#"{
             "symbols": {
@@ -145,6 +182,60 @@ mod tests {
         let dwarf = DwarfSymbols::load_from_file(temp_file.path())?;
         assert_eq!(dwarf.get_symbol_address("init_task"), Some(281473568538624));
         assert_eq!(dwarf.get_field_offset("task_struct", "pid"), Some(808));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_dwarf_symbols_new_format() -> Result<(), Box<dyn std::error::Error>> {
+        // Create a temporary file with new dwarf2json format (6.x)
+        let mut temp_file = NamedTempFile::new()?;
+        let sample_content = r#"{
+            "metadata": {
+                "format": "6.2.0"
+            },
+            "symbols": {
+                "init_task": {
+                    "type": {
+                        "kind": "struct",
+                        "name": "task_struct"
+                    },
+                    "address": 18446744071610414144
+                }
+            },
+            "user_types": {
+                "task_struct": {
+                    "size": 9664,
+                    "fields": {
+                        "pid": {
+                            "type": {
+                                "kind": "base",
+                                "name": "int"
+                            },
+                            "offset": 1112
+                        },
+                        "comm": {
+                            "type": {
+                                "kind": "array",
+                                "count": 16,
+                                "subtype": {
+                                    "kind": "base",
+                                    "name": "char"
+                                }
+                            },
+                            "offset": 1320
+                        }
+                    }
+                }
+            }
+        }"#;
+        temp_file.write_all(sample_content.as_bytes())?;
+        temp_file.flush()?;
+
+        let dwarf = DwarfSymbols::load_from_file(temp_file.path())?;
+        assert_eq!(dwarf.get_symbol_address("init_task"), Some(18446744071610414144));
+        assert_eq!(dwarf.get_field_offset("task_struct", "pid"), Some(1112));
+        assert_eq!(dwarf.get_field_offset("task_struct", "comm"), Some(1320));
 
         Ok(())
     }

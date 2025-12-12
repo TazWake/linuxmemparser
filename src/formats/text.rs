@@ -1,6 +1,6 @@
 //! Text (table) output formatter for the Linux Memory Parser tool
 use crate::formats::traits::OutputFormatter;
-use crate::kernel::{ProcessInfo, ConnectionInfo, ModuleInfo};
+use crate::kernel::{ProcessInfo, ConnectionInfo, ModuleInfo, format_start_time};
 use crate::error::AnalysisError;
 use prettytable::{Table, Row, Cell};
 
@@ -31,7 +31,7 @@ impl OutputFormatter for TextFormatter {
                 Cell::new(&proc.ppid.to_string()),
                 Cell::new(&proc.comm),
                 Cell::new(&proc.state),
-                Cell::new(&proc.start_time.to_string()),
+                Cell::new(&format_start_time(proc.start_time)),
                 Cell::new(&proc.uid.to_string()),
                 Cell::new(&proc.gid.to_string()),
                 Cell::new(&proc.cmdline),

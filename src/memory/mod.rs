@@ -18,6 +18,7 @@ impl MemoryRegion {
     }
 
     /// Convert a virtual address to a file offset within this region
+    #[allow(dead_code)]  // Reserved for future region-based translation
     pub fn virtual_to_file_offset(&self, virtual_addr: u64) -> Option<u64> {
         if self.contains(virtual_addr) {
             let offset = virtual_addr - self.start;

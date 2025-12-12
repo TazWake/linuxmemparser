@@ -15,13 +15,8 @@ impl ForensicPlugin for PsListPlugin {
     }
 
     fn run(&self, context: &AnalysisContext) -> Result<PluginOutput, AnalysisError> {
-        // Find init_task using the existing method
-        // Pass translator so it can check if symbol addresses are translatable
-        let init_task_offset = context.symbol_resolver.find_init_task(
-            &context.memory_map.mapped,
-            Some(context.translator)
-        )
-        .ok_or_else(|| AnalysisError::SymbolNotFound("init_task".to_string()))?;
+        // Use the init_task_offset from context (already adjusted for KASLR)
+        let init_task_offset = context.init_task_offset as u64;
 
         // Create a process extractor
         let process_extractor = ProcessExtractor::new();

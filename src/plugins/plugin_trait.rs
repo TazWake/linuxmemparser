@@ -10,6 +10,7 @@ pub struct AnalysisContext<'a> {
     pub memory_map: &'a MemoryMap,
     pub translator: &'a MemoryTranslator,
     pub symbol_resolver: &'a SymbolResolver,
+    pub init_task_offset: usize,  // File offset of init_task (with KASLR applied)
 }
 
 /// Output from plugins - different types of data

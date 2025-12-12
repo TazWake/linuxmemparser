@@ -139,27 +139,92 @@ impl KernelParser {
 // Include the process extractor module
 pub mod process_extractor;
 
+/// Format start_time from nanoseconds since boot to human-readable elapsed time
+pub fn format_start_time(start_time_ns: u64) -> String {
+    if start_time_ns == 0 {
+        return "0".to_string();
+    }
+
+    let start_secs = start_time_ns / 1_000_000_000;
+
+    let days = start_secs / 86400;
+    let hours = (start_secs % 86400) / 3600;
+    let minutes = (start_secs % 3600) / 60;
+    let seconds = start_secs % 60;
+
+    if days > 0 {
+        format!("{}d {:02}h {:02}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{:02}h {:02}m {:02}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{:02}m {:02}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
+}
+
 /// Validate process information to ensure it represents valid kernel data
 pub fn validate_process_info(proc: &ProcessInfo) -> bool {
-    // Check that PID is reasonable (> 0 and within Linux limits)
+    let debug = std::env::var("LINMEMPARSER_DEBUG").is_ok();
+
+    if debug {
+        eprintln!("[DEBUG] Validating PID {}: comm='{}', uid={}, gid={}",
+                  proc.pid, proc.comm, proc.uid, proc.gid);
+    }
+
+    // Check that PID is reasonable (>= 0 and within Linux limits)
     if proc.pid < 0 || proc.pid > 4194304 {  // Linux max PID
+        if debug {
+            eprintln!("[DEBUG] Validation failed: PID {} out of range", proc.pid);
+        }
         return false;
+    }
+
+    // Special handling for PID 0 (swapper/idle task)
+    // This is a kernel thread that may have empty or unusual comm field due to offset mismatches
+    if proc.pid == 0 {
+        if debug {
+            eprintln!("[DEBUG] PID 0 detected (swapper) - relaxing validation");
+        }
+        // For PID 0, we only check that it exists, don't validate comm/uid/gid strictly
+        return true;
     }
 
     // Check that process name is not empty and contains reasonable characters
     if proc.comm.is_empty() {
+        if debug {
+            eprintln!("[DEBUG] Validation failed: comm is empty");
+        }
         return false;
     }
 
     // Check that comm field contains mostly printable ASCII characters
     let printable_count = proc.comm.chars().filter(|c| c.is_ascii() && !c.is_control()).count();
-    if printable_count < proc.comm.len() / 2 {
+
+    // For kernel threads (typically PID < 300), be more lenient with comm validation
+    // They may have unusual names or the offset might be slightly off
+    let required_ratio = if proc.pid < 300 { 0.3 } else { 0.5 };
+    let required_printable = (proc.comm.len() as f64 * required_ratio) as usize;
+
+    if printable_count < required_printable {
+        if debug {
+            eprintln!("[DEBUG] Validation failed: comm '{}' has only {}/{} printable chars (need {})",
+                      proc.comm, printable_count, proc.comm.len(), required_printable);
+        }
         return false;
     }
 
     // Check that UID and GID are reasonable values
     if proc.uid > 65535 || proc.gid > 65535 {
+        if debug {
+            eprintln!("[DEBUG] Validation failed: uid={} or gid={} out of range",
+                      proc.uid, proc.gid);
+        }
         return false;
+    }
+
+    if debug {
+        eprintln!("[DEBUG] Validation passed for PID {}", proc.pid);
     }
 
     // Additional validation checks could go here

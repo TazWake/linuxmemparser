@@ -29,9 +29,13 @@ pub struct Cli {
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<std::path::PathBuf>,
 
-    /// Increase verbosity (-v, -vv, -vvv)
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    pub verbose: u8,
+    /// Enable debug output
+    #[arg(short, long)]
+    pub debug: bool,
+
+    /// Enable verbose output (warnings, status messages)
+    #[arg(short, long)]
+    pub verbose: bool,
 
     /// List available plugins
     #[arg(short, long)]
