@@ -22,10 +22,11 @@ MemoryAnalysisLog
 *.swp
 *.swo
 
-# Test data - ignore uncompressed LIME files but allow compressed ones - ignore System.map and vmlinux files
+# Test data - ignore uncompressed LIME files but allow compressed ones - ignore System.map and vmlinux files, and potentially large JSON files created by dwarf2json.
 TESTDATA/**/*.lime
 TESTDATA/**/System.map*
 TESTDATA/**/vmlinu*
+TESTDATA/**/*.json
 !TESTDATA/**/*.lime.gz
 !TESTDATA/**/*.lime.xz
 !TESTDATA/**/*.lime.bz2
