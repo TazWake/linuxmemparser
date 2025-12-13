@@ -7,8 +7,10 @@ pub struct ProcessInfo {
     pub offset: u64, // File offset where the task_struct is found
     pub pid: i32,
     pub comm: String,
-    pub ppid: i32,       // Parent process ID
-    pub start_time: u64, // Process start time
+    pub ppid: i32,          // Parent process ID
+    pub start_time_ns: u64, // Process start time (nanoseconds since boot)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time_utc: Option<String>, // Process start time (ISO8601 UTC timestamp, if boot_time provided)
     pub uid: u32,        // User ID
     pub gid: u32,        // Group ID
     pub state: String,   // Process state
@@ -234,6 +236,18 @@ pub fn validate_process_info(proc: &ProcessInfo) -> bool {
             eprintln!(
                 "[DEBUG] Validation failed: uid={} or gid={} out of range",
                 proc.uid, proc.gid
+            );
+        }
+        return false;
+    }
+
+    // Validate PPID is in reasonable range (same as PID validation)
+    // PPID should be >= 0 and within Linux limits
+    if proc.ppid < 0 || proc.ppid > 4194304 {
+        if debug {
+            eprintln!(
+                "[DEBUG] Validation failed: PPID {} out of range for PID {}",
+                proc.ppid, proc.pid
             );
         }
         return false;

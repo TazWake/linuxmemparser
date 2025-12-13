@@ -40,6 +40,7 @@ impl ProcessExtractor {
         translator: &MemoryTranslator,
         symbol_resolver: &SymbolResolver,
         task_struct_offset: u64,
+        boot_time: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<ProcessInfo, AnalysisError> {
         let mapped = &memory_map.mapped;
 
@@ -87,17 +88,51 @@ impl ProcessExtractor {
             KernelParser::read_u64(mapped, (task_struct_offset as usize) + parent_offset)
                 .unwrap_or(0);
 
-        let ppid = if parent_ptr != 0 {
-            // Translate the virtual address of the parent task_struct to file offset
+        // Special case handling for init_task and kernel threads
+        // PID 0 (swapper/idle) has no parent, PPID should be 0
+        // kthreadd (usually PID 2) also has PPID 0 as it's created by the kernel
+        let ppid = if pid == 0 {
+            // init_task (PID 0) has no parent
+            debug!("[DEBUG] PID 0 (init_task/swapper) - setting PPID to 0 (no parent)");
+            0
+        } else if parent_ptr == 0 {
+            // No parent pointer - this is unusual but can happen for kernel threads
+            debug!("[DEBUG] PID {}: parent_ptr is NULL, setting PPID to 0", pid);
+            0
+        } else if parent_ptr == task_struct_offset {
+            // Self-referential parent pointer (parent points to itself)
+            // This can happen for PID 0 and some kernel threads
+            debug!(
+                "[DEBUG] PID {}: self-referential parent (parent_ptr == task_struct_offset), setting PPID to 0",
+                pid
+            );
+            0
+        } else {
+            // Normal case: translate parent pointer and read parent's PID
             if let Some(parent_file_offset) = translator.virtual_to_file_offset(parent_ptr) {
                 // Read the PID from the parent task_struct
-                KernelParser::read_i32(mapped, parent_file_offset as usize + pid_offset)
-                    .unwrap_or(0)
+                let parent_pid =
+                    KernelParser::read_i32(mapped, parent_file_offset as usize + pid_offset)
+                        .unwrap_or(0);
+
+                // Sanity check: if parent PID is garbage (very large or negative), default to 0
+                if parent_pid < 0 || parent_pid > 4194304 {
+                    debug!(
+                        "[DEBUG] PID {}: parent PID {} is out of range, setting PPID to 0",
+                        pid, parent_pid
+                    );
+                    0
+                } else {
+                    parent_pid
+                }
             } else {
-                0 // Default to 0 if translation fails
+                // Translation failed - parent not in memory dump
+                debug!(
+                    "[DEBUG] PID {}: Failed to translate parent_ptr 0x{:x}, setting PPID to 0",
+                    pid, parent_ptr
+                );
+                0
             }
-        } else {
-            0 // No parent pointer
         };
 
         // Read start time
@@ -250,12 +285,24 @@ impl ProcessExtractor {
             "[kernel thread]".to_string()
         };
 
+        // Calculate UTC timestamp if boot_time is provided
+        let start_time_utc = if let Some(boot_dt) = boot_time {
+            // Convert nanoseconds to Duration
+            let duration = chrono::Duration::nanoseconds(start_time as i64);
+            // Add to boot time to get process start time
+            let process_start = boot_dt + duration;
+            Some(process_start.to_rfc3339())
+        } else {
+            None
+        };
+
         Ok(ProcessInfo {
             offset: task_struct_offset,
             pid,
             comm,
             ppid,
-            start_time,
+            start_time_ns: start_time,
+            start_time_utc,
             uid,
             gid,
             state,
@@ -270,6 +317,7 @@ impl ProcessExtractor {
         translator: &MemoryTranslator,
         symbol_resolver: &SymbolResolver,
         init_task_offset: u64,
+        boot_time: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Vec<ProcessInfo>, AnalysisError> {
         let mut processes = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -340,12 +388,39 @@ impl ProcessExtractor {
                 translator,
                 symbol_resolver,
                 current_offset as u64,
+                boot_time,
             ) {
                 Ok(process_info) => {
+                    // Special tracking for PID 1 (init/systemd) to debug why it might be missing
+                    let is_pid_1 = process_info.pid == 1;
+                    if is_pid_1 {
+                        debug!(
+                            "[DEBUG] *** Found PID 1 ({}): PPID={}, offset=0x{:x} ***",
+                            process_info.comm, process_info.ppid, current_offset
+                        );
+                    }
+
                     // Validate the process information before adding to results
                     if crate::kernel::validate_process_info(&process_info) {
                         processes.push(process_info);
+
+                        // Log when PID 1 is successfully added
+                        if is_pid_1 {
+                            debug!("[DEBUG] *** PID 1 passed validation and was added to process list ***");
+                        }
                     } else {
+                        // Extra warning if PID 1 fails validation
+                        if is_pid_1 {
+                            warn!("[WARNING] *** PID 1 (init/systemd) FAILED VALIDATION - this should not happen! ***");
+                            warn!(
+                                "[WARNING]     comm='{}', ppid={}, uid={}, gid={}",
+                                process_info.comm,
+                                process_info.ppid,
+                                process_info.uid,
+                                process_info.gid
+                            );
+                        }
+
                         warn!(
                             "[WARNING] Process validation failed for PID {}, skipping",
                             process_info.pid

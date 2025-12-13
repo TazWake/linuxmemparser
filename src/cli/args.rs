@@ -21,6 +21,11 @@ pub struct Cli {
     #[arg(short, long, value_name = "FILE")]
     pub symbols: Option<std::path::PathBuf>,
 
+    /// System boot time in ISO8601 format (e.g., 2024-12-10T14:30:00Z)
+    /// Used to convert process start times from relative (elapsed) to absolute (UTC) timestamps
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub boot_time: Option<String>,
+
     /// Output format
     #[arg(short, long, value_enum, default_value = "text")]
     pub format: OutputFormatArg,

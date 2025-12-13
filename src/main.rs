@@ -644,12 +644,35 @@ fn main() -> Result<(), AnalysisError> {
         debug!("[DEBUG] PAGE_OFFSET detection not needed for this kernel configuration");
     }
 
+    // Parse boot time if provided
+    let boot_time = if let Some(boot_time_str) = &cli.boot_time {
+        match chrono::DateTime::parse_from_rfc3339(boot_time_str) {
+            Ok(dt) => {
+                let boot_time_utc = dt.with_timezone(&chrono::Utc);
+                warn!("[INFO] Using boot time: {}", boot_time_utc.to_rfc3339());
+                Some(boot_time_utc)
+            }
+            Err(e) => {
+                eprintln!(
+                    "[ERROR] Failed to parse boot time '{}': {}",
+                    boot_time_str, e
+                );
+                eprintln!("[ERROR] Expected format: ISO8601 (e.g., 2024-12-10T14:30:00Z)");
+                eprintln!("[ERROR] Continuing without boot time (using elapsed time instead)");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Create analysis context
     let context = AnalysisContext {
         memory_map: &memory_map,
         translator: &translator,
         symbol_resolver: &symbol_resolver,
         init_task_offset, // Pass the KASLR-adjusted init_task offset
+        boot_time,
     };
 
     // Determine output format and destination

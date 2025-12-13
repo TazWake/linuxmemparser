@@ -27,6 +27,7 @@ impl ForensicPlugin for PsListPlugin {
             context.translator,
             context.symbol_resolver,
             init_task_offset,
+            context.boot_time,
         )?;
 
         Ok(PluginOutput::Processes(processes))

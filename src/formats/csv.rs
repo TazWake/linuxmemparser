@@ -11,13 +11,14 @@ impl OutputFormatter for CsvFormatter {
     fn format_processes(&self, processes: &[ProcessInfo]) -> Result<String, AnalysisError> {
         let mut wtr = Writer::from_writer(vec![]);
 
-        // Write header
+        // Write header - include both time formats for compatibility
         wtr.write_record(&[
             "pid",
             "ppid",
             "comm",
             "state",
-            "start_time",
+            "start_time_ns",
+            "start_time_utc",
             "uid",
             "gid",
             "cmdline",
@@ -30,7 +31,11 @@ impl OutputFormatter for CsvFormatter {
                 proc.ppid.to_string(),
                 proc.comm.clone(),
                 proc.state.clone(),
-                proc.start_time.to_string(),
+                proc.start_time_ns.to_string(),
+                proc.start_time_utc
+                    .as_ref()
+                    .unwrap_or(&String::from(""))
+                    .clone(),
                 proc.uid.to_string(),
                 proc.gid.to_string(),
                 proc.cmdline.clone(),

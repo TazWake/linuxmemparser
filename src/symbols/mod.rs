@@ -154,7 +154,18 @@ impl SymbolResolver {
             .get_struct_field_offset_fallback("task_struct", "tasks")
             .unwrap_or(0xa00) as usize;
 
-        // Search for "swapper" string
+        // IMPORTANT: Search for "swapper/0" first (the main init_task)
+        // This avoids finding per-CPU idle tasks like "swapper/1", "swapper/2", etc.
+        // which have incomplete process lists
+        debug!("[DEBUG] First trying to find 'swapper/0' (main init_task)...");
+        if let Some(init_task) =
+            self.find_swapper_variant(memory, b"swapper/0", comm_offset, pid_offset, tasks_offset)
+        {
+            return Some(init_task);
+        }
+
+        debug!("[DEBUG] 'swapper/0' not found, trying generic 'swapper'...");
+        // Fall back to generic "swapper" search
         let finder = memmem::Finder::new(b"swapper");
 
         let mut matches = 0;
@@ -177,8 +188,18 @@ impl SymbolResolver {
                 crate::kernel::KernelParser::read_i32(memory, potential_task_struct + pid_offset)
             {
                 if pid == 0 {
-                    debug!("[DEBUG] Found 'swapper' at offset 0x{:x}, potential task_struct at 0x{:x}, PID={}",
-                             match_pos, potential_task_struct, pid);
+                    // Read the full comm name to show which swapper variant this is
+                    let comm_name = if potential_task_struct + comm_offset + 16 <= memory.len() {
+                        let comm_bytes = &memory[potential_task_struct + comm_offset
+                            ..potential_task_struct + comm_offset + 16];
+                        let null_pos = comm_bytes.iter().position(|&b| b == 0).unwrap_or(16);
+                        std::str::from_utf8(&comm_bytes[..null_pos]).unwrap_or("unknown")
+                    } else {
+                        "unknown"
+                    };
+
+                    debug!("[DEBUG] Found 'swapper' (comm='{}') at offset 0x{:x}, potential task_struct at 0x{:x}, PID={}",
+                             comm_name, match_pos, potential_task_struct, pid);
 
                     // Validate: check tasks.next pointer
                     if potential_task_struct + tasks_offset + 8 <= memory.len() {
@@ -194,13 +215,10 @@ impl SymbolResolver {
                                 && tasks_next != 0xffffffffffffffff
                             {
                                 debug!(
-                                    "[DEBUG] ✓ Valid init_task found at file offset 0x{:x}",
-                                    potential_task_struct
+                                    "[DEBUG] ✓ Valid init_task found at file offset 0x{:x} (comm='{}')",
+                                    potential_task_struct, comm_name
                                 );
-                                debug!(
-                                    "[DEBUG] ✓ comm='swapper', PID=0, tasks.next=0x{:x}",
-                                    tasks_next
-                                );
+                                debug!("[DEBUG] ✓ PID=0, tasks.next=0x{:x}", tasks_next);
                                 return Some(potential_task_struct);
                             } else {
                                 debug!("[DEBUG]   - Rejected: tasks.next=0x{:x} not a valid kernel address", tasks_next);
@@ -215,6 +233,74 @@ impl SymbolResolver {
             "[DEBUG] Scanned {} 'swapper' occurrences, none matched init_task criteria",
             matches
         );
+        None
+    }
+
+    /// Helper function to search for a specific swapper variant (e.g., "swapper/0")
+    fn find_swapper_variant(
+        &self,
+        memory: &[u8],
+        pattern: &[u8],
+        comm_offset: usize,
+        pid_offset: usize,
+        tasks_offset: usize,
+    ) -> Option<usize> {
+        let finder = memmem::Finder::new(pattern);
+
+        for match_pos in finder.find_iter(memory) {
+            // Calculate potential task_struct start by subtracting comm_offset
+            if match_pos < comm_offset {
+                continue;
+            }
+
+            let potential_task_struct = match_pos - comm_offset;
+
+            // Check if PID field is 0
+            if potential_task_struct + pid_offset + 4 > memory.len() {
+                continue;
+            }
+
+            if let Some(pid) =
+                crate::kernel::KernelParser::read_i32(memory, potential_task_struct + pid_offset)
+            {
+                if pid == 0 {
+                    let comm_str = std::str::from_utf8(pattern).unwrap_or("unknown");
+                    debug!(
+                        "[DEBUG] Found '{}' at offset 0x{:x}, potential task_struct at 0x{:x}, PID={}",
+                        comm_str, match_pos, potential_task_struct, pid
+                    );
+
+                    // Validate: check tasks.next pointer
+                    if potential_task_struct + tasks_offset + 8 <= memory.len() {
+                        if let Some(tasks_next) = crate::kernel::KernelParser::read_u64(
+                            memory,
+                            potential_task_struct + tasks_offset,
+                        ) {
+                            const MIN_KERNEL_ADDR: u64 = 0xffff800000000000;
+                            const MAX_KERNEL_ADDR: u64 = 0xfffffffffff00000;
+
+                            if tasks_next >= MIN_KERNEL_ADDR
+                                && tasks_next < MAX_KERNEL_ADDR
+                                && tasks_next != 0xffffffffffffffff
+                            {
+                                debug!(
+                                    "[DEBUG] ✓ Valid init_task found at file offset 0x{:x} (comm='{}')",
+                                    potential_task_struct, comm_str
+                                );
+                                debug!("[DEBUG] ✓ PID=0, tasks.next=0x{:x}", tasks_next);
+                                return Some(potential_task_struct);
+                            } else {
+                                debug!(
+                                    "[DEBUG]   - Rejected: tasks.next=0x{:x} not a valid kernel address",
+                                    tasks_next
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         None
     }
 

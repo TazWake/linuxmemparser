@@ -26,12 +26,19 @@ impl OutputFormatter for TextFormatter {
 
         // Data rows
         for proc in processes {
+            // Use UTC timestamp if available, otherwise show elapsed time
+            let time_display = proc
+                .start_time_utc
+                .as_ref()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format_start_time(proc.start_time_ns));
+
             table.add_row(Row::new(vec![
                 Cell::new(&proc.pid.to_string()),
                 Cell::new(&proc.ppid.to_string()),
                 Cell::new(&proc.comm),
                 Cell::new(&proc.state),
-                Cell::new(&format_start_time(proc.start_time)),
+                Cell::new(&time_display),
                 Cell::new(&proc.uid.to_string()),
                 Cell::new(&proc.gid.to_string()),
                 Cell::new(&proc.cmdline),

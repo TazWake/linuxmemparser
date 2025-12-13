@@ -11,6 +11,7 @@ pub struct AnalysisContext<'a> {
     pub translator: &'a MemoryTranslator,
     pub symbol_resolver: &'a SymbolResolver,
     pub init_task_offset: usize, // File offset of init_task (with KASLR applied)
+    pub boot_time: Option<chrono::DateTime<chrono::Utc>>, // System boot time for absolute timestamp calculation
 }
 
 /// Output from plugins - different types of data
